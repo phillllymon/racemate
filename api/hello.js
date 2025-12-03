@@ -6,7 +6,7 @@ export default function handler(req, res) {
   
     // Respond to preflight requests immediately
     if (req.method === "OPTIONS") {
-      return res.status(200).end();
+        return res.status(200).end();
     }
   
     // Your actual response
