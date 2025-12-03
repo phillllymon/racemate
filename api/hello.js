@@ -10,5 +10,9 @@ export default function handler(req, res) {
     }
   
     // Your actual response
-    res.status(200).json({ message: "Hello from the backend!" });
+    res.status(200).json({
+        message: "Hello from the backend!",
+        key: process.env.NEON_DATA_API_KEY,
+        url: process.env.NEON_DATA_API_ENDPOINT
+    });
 }
