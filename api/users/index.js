@@ -1,5 +1,4 @@
 const crypto = require("crypto");
-const CREDS = require("../CREDS");
 
 export default async function handler(req, res) {
     // FOR LOCAL TESTING ONLY IN DEV - DELETE FOR PROD!!!!
@@ -27,11 +26,11 @@ export default async function handler(req, res) {
         `;
 
         try {
-            const response = await fetch(CREDS.NEON_DATA_API_ENDPOINT, {
+            const response = await fetch(process.env.NEON_DATA_API_ENDPOINT, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${CREDS.NEON_DATA_API_KEY}`
+                    Authorization: `Bearer ${process.env.NEON_DATA_API_KEY}`
                 },
                 body: JSON.stringify({
                     query,
