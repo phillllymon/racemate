@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         }
     
         // Call Neon Auth API
-        const response = await fetch("https://auth.neon.tech/v1/users", {
+        const response = await fetch("https://ep-icy-sound-afktlfm2.apirest.c-2.us-west-2.aws.neon.tech/neondb/rest/v1/users", {
             method: "POST",
             headers: {
             "Content-Type": "application/json",
