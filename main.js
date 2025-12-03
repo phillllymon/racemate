@@ -12,7 +12,7 @@
 // });
 
 async function test() {
-    const url = "https://racematevercel.vercel.app/api/users"; // <-- replace this
+    const url = "https://racematevercel.vercel.app/api/users/"; // <-- replace this
     // const url = "https://racematevercel.vercel.app/api/hello"; // <-- replace this
   
     const response = await fetch(url, {

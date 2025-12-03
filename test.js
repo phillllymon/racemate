@@ -1,6 +1,6 @@
 async function test() {
-    // const url = "https://racematevercel.vercel.app/api/users"; // <-- replace this
-    const url = "https://racematevercel.vercel.app/api/hello"; // <-- replace this
+    const url = "https://racematevercel.vercel.app/api/users/index.js"; // <-- replace this
+    // const url = "https://racematevercel.vercel.app/api/hello"; // <-- replace this
   
     const response = await fetch(url, {
         method: "POST",
@@ -13,7 +13,9 @@ async function test() {
   
     const result = await response;
     console.log(result);
-    // console.log(result);
+    result.json().then((r) => {
+        console.log(r);
+    })
 }
 
 test().catch(console.error);
