@@ -1,2 +1,4 @@
 CREDS.js
 node_modules
+.env
+serve.js

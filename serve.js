@@ -1,18 +1,36 @@
+require("dotenv").config();
+
+
+    
+
 const http = require("http");
 const fs = require("fs");
+const path = require("path");
 
-// import http from "http";
-// import fs from "fs";
+
+// Import API route handlers
+const helloHandler = require("./api/hello.js").default;
+const userHandler = require("./api/users.js").default;
 
 const server = http.createServer((req, res) => {
-    const file = req.url === "/" ? "/index.html" : req.url;
-    fs.readFile("." + file, (err, data) => {
-        if (err) {
+    if (req.url.startsWith("/api/")) {
+        if (req.url === "/api/hello.js") return helloHandler(req, res);
+        if (req.url === "/api/users") return userHandler(req, res);
+
         res.writeHead(404);
-        res.end("Not found");
+        return res.end("API route not found");
+    }
+
+    const file = req.url === "/" ? "/index.html" : req.url;
+    const safePath = path.join(__dirname, file);
+
+    fs.readFile(safePath, (err, data) => {
+        if (err) {
+            res.writeHead(404);
+            res.end("Not found");
         } else {
-        res.writeHead(200);
-        res.end(data);
+            res.writeHead(200);
+            res.end(data);
         }
     });
 });
