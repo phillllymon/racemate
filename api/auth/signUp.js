@@ -20,13 +20,20 @@ module.exports.default = async function handler(req, res) {
             // res.writeHead(200, { "Content-Type": "application/json" });
             // res.end(JSON.stringify({ message: myVar }));
 
-            const users = await sql`
+            // const users = await sql`
+            //     SELECT id, name, email, created_at
+            //     FROM users
+            //     ORDER BY id ASC
+            // `;
+
+            sql`
                 SELECT id, name, email, created_at
                 FROM users
                 ORDER BY id ASC
-            `;
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ message: users }));
+            `.then((users) => {
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ message: users }));
+            });
 
         } catch (err) {
             res.writeHead(500, { "Content-Type": "application/json" });
