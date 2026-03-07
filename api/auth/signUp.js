@@ -26,12 +26,6 @@ module.exports.default = async function handler(req, res) {
             //     ORDER BY id ASC
             // `;
 
-            const data = await sql`
-                INSERT INTO puzzles (puzzle, author, title, rating, wins, loses)
-                VALUES (${JSON.stringify(newPuzzle)}, ${author}, ${title}, '', 0, 0)
-                RETURNING *
-            `;
-
             sql`
                 INSERT INTO users (name, email, password_hash)
                 VALUES (${myVar}, ${myVar}, ${myVar})
