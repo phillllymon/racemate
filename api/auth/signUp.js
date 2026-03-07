@@ -15,8 +15,8 @@ module.exports.default = async function handler(req, res) {
 
     req.on("end", () => {
         try {
-            // const parsed = JSON.parse(body);
-            // const { myVar } = parsed;
+            const parsed = JSON.parse(body);
+            const { myVar } = parsed;
             // res.writeHead(200, { "Content-Type": "application/json" });
             // res.end(JSON.stringify({ message: myVar }));
 
