@@ -26,13 +26,19 @@ module.exports.default = async function handler(req, res) {
             //     ORDER BY id ASC
             // `;
 
+            const data = await sql`
+                INSERT INTO puzzles (puzzle, author, title, rating, wins, loses)
+                VALUES (${JSON.stringify(newPuzzle)}, ${author}, ${title}, '', 0, 0)
+                RETURNING *
+            `;
+
             sql`
-                SELECT id, name, email, created_at
-                FROM users
-                ORDER BY id ASC
-            `.then((users) => {
+                INSERT INTO users (name, email, password_hash)
+                VALUES (${myVar}, ${myVar}, ${myVar})
+                RETURNING *
+            `.then((newUser) => {
                 res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({ message: users }));
+                res.end(JSON.stringify({ message: newUser }));
             });
 
         } catch (err) {
