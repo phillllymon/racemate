@@ -75,7 +75,7 @@ function generateToken(n) {
     ];
     let token = "";
     while (token.length < n) {
-        token += chars[chars.length * Math.random()];
+        token += chars[Math.floor(chars.length * Math.random())];
     }
     return token;
 }

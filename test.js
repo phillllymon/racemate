@@ -8,7 +8,7 @@ const plainPassword = "userPassword123";
 //     console.log(hash);
 // });
 
-fetch("https://racematevercel.vercel.app/api/auth/signUp",  {
+fetch("https://racematevercel.vercel.app/api/auth/signIn",  {
 // fetch("http://localhost:3000/api/auth/signUp",  {
   method: "POST",
   headers: {
