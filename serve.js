@@ -13,6 +13,7 @@ const helloHandler = require("./api/hello.js").default;
 const userHandler = require("./api/users.js").default;
 const signUpHandler = require("./api/auth/signUp.js").default;
 const signInHandler = require("./api/auth/signIn.js").default;
+const signOutHandler = require("./api/auth/signOut.js").default;
 
 const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
@@ -20,6 +21,7 @@ const server = http.createServer((req, res) => {
         if (req.url === "/api/users") return userHandler(req, res);
         if (req.url === "/api/auth/signUp") return signUpHandler(req, res);
         if (req.url === "/api/auth/signIn") return signInHandler(req, res);
+        if (req.url === "/api/auth/signOut") return signOutHandler(req, res);
 
         res.writeHead(404);
         return res.end("API route not found");

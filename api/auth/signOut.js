@@ -18,31 +18,23 @@ module.exports.default = async function handler(req, res) {
     req.on("end", () => {
         try {
             const parsed = JSON.parse(body);
-            const { email, password } = parsed;
+            const { email, token } = parsed;
 
             sql`SELECT * FROM users WHERE email = ${email}`.then((users) => {
                 if (users.length > 0) {
-                    bcrypt.compare(password, users[0]["password_hash"]).then((passwordMatch) => {
-                        if (passwordMatch) {
-                            const token = generateToken(20);
-                            bcrypt.hash(token, saltRounds).then((tokenHash) => {
-                                const returnObj = {
-                                    message: "signed in",
-                                    token: token,
-                                    user: users[0]
-                                };
-                                sql`
-                                    UPDATE users
-                                    SET login_token = ${tokenHash}
-                                    WHERE id = ${users[0]["id"]}
-                                `.then(() => {
-                                    res.writeHead(200, { "Content-Type": "application/json" });
-                                    res.end(JSON.stringify(returnObj));
-                                });
+                    bcrypt.compare(token, users[0]["login_token"]).then((tokenMatch) => {
+                        if (tokenMatch) {
+                            sql`
+                                UPDATE users
+                                SET login_token = ${null}
+                                WHERE id = ${users[0]["id"]}
+                            `.then(() => {
+                                res.writeHead(200, { "Content-Type": "application/json" });
+                                res.end(JSON.stringify({ message: "signed out" }));
                             });
                         } else {
                             res.writeHead(200, { "Content-Type": "application/json" });
-                            res.end(JSON.stringify({ message: "wrong password" }));
+                            res.end(JSON.stringify({ message: "token mismatch" }));
                         }
                     });
                 } else {
