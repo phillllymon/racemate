@@ -20,16 +20,24 @@ module.exports.default = async function handler(req, res) {
             const parsed = JSON.parse(body);
             const { username, email, password } = parsed;
 
-            bcrypt.hash(password, saltRounds).then((passwordHash) => {
-                sql`
-                    INSERT INTO users (name, email, password_hash)
-                    VALUES (${username}, ${email}, ${passwordHash})
-                    RETURNING *
-                `.then((newUser) => {
+            sql`SELECT * FROM users WHERE email = ${email}`.then((users) => {
+                if (users.length === 0) {
+                    bcrypt.hash(password, saltRounds).then((passwordHash) => {
+                        sql`
+                            INSERT INTO users (name, email, password_hash)
+                            VALUES (${username}, ${email}, ${passwordHash})
+                            RETURNING *
+                        `.then((newUser) => {
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify({ message: newUser }));
+                        });
+                    });
+                } else {
                     res.writeHead(200, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({ message: newUser }));
-                });
+                    res.end(JSON.stringify({ message: "duplicate email" }));
+                }
             });
+
         } catch (err) {
             res.writeHead(500, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ errror: err ? err.message : "Internal server error" }));
