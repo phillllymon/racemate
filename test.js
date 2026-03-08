@@ -15,8 +15,8 @@ fetch("https://racematevercel.vercel.app/api/auth/signIn",  {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    username: "Robert",
     email: "itsabitrunnysir@gmail.com",
+    token: "1haph1ha5rb6fca0lvmf",
     password: "password123"
   })
 }).then((res) => {

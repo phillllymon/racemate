@@ -29,7 +29,11 @@ module.exports.default = async function handler(req, res) {
                                 const returnObj = {
                                     message: "signed in",
                                     token: token,
-                                    user: users[0]
+                                    user: {
+                                        id: users[0]["id"],
+                                        name: users[0]["name"],
+                                        email: users[0]["email"]
+                                    }
                                 };
                                 sql`
                                     UPDATE users

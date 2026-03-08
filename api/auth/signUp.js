@@ -29,7 +29,14 @@ module.exports.default = async function handler(req, res) {
                             RETURNING *
                         `.then((newUser) => {
                             res.writeHead(200, { "Content-Type": "application/json" });
-                            res.end(JSON.stringify({ message: newUser }));
+                            res.end(JSON.stringify({
+                                message: "signed up",
+                                user: {
+                                    id: newUser["id"],
+                                    name: newUser["name"],
+                                    email: newUser["email"]
+                                }
+                            }));
                         });
                     });
                 } else {
