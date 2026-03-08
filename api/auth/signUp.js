@@ -1,4 +1,6 @@
 const { neon } = require("@neondatabase/serverless");
+const bcrypt = require('bcryptjs');
+const saltRounds = 10;
 
 const sql = neon(process.env.DATABASE_URL);
 
@@ -16,25 +18,18 @@ module.exports.default = async function handler(req, res) {
     req.on("end", () => {
         try {
             const parsed = JSON.parse(body);
-            const { myVar } = parsed;
-            // res.writeHead(200, { "Content-Type": "application/json" });
-            // res.end(JSON.stringify({ message: myVar }));
+            const { username, email, password } = parsed;
 
-            // const users = await sql`
-            //     SELECT id, name, email, created_at
-            //     FROM users
-            //     ORDER BY id ASC
-            // `;
-
-            sql`
-                INSERT INTO users (name, email, password_hash)
-                VALUES (${myVar}, ${myVar}, ${myVar})
-                RETURNING *
-            `.then((newUser) => {
-                res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({ message: newUser }));
+            bcrypt.hash(password, saltRounds).then((passwordHash) => {
+                sql`
+                    INSERT INTO users (name, email, password_hash)
+                    VALUES (${username}, ${email}, ${passwordHash})
+                    RETURNING *
+                `.then((newUser) => {
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ message: newUser }));
+                });
             });
-
         } catch (err) {
             res.writeHead(500, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ errror: err ? err.message : "Internal server error" }));
