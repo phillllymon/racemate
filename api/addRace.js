@@ -1,6 +1,5 @@
 const { neon } = require("@neondatabase/serverless");
 const bcrypt = require('bcryptjs');
-const saltRounds = 10;
 
 const sql = neon(process.env.DATABASE_URL);
 
@@ -18,19 +17,22 @@ module.exports.default = async function handler(req, res) {
     req.on("end", () => {
         try {
             const parsed = JSON.parse(body);
-            const { userId, token } = parsed;
+            const { userId, token, raceName, raceInfo } = parsed;
 
             sql`SELECT * FROM users WHERE id = ${userId}`.then((users) => {
-                if (users.length > 0) {
+                if (users.length === 1) {
                     bcrypt.compare(token, users[0]["login_token"]).then((tokenMatch) => {
                         if (tokenMatch) {
                             sql`
-                                UPDATE users
-                                SET login_token = ${null}
-                                WHERE id = ${users[0]["id"]}
-                            `.then(() => {
+                                INSERT INTO races (name, owner, info)
+                                VALUES (${raceName}, ${userId}, ${raceInfo})
+                                RETURNING *
+                            `.then((newRaceInfo) => {
                                 res.writeHead(200, { "Content-Type": "application/json" });
-                                res.end(JSON.stringify({ message: "signed out" }));
+                                res.end(JSON.stringify({
+                                    message: "race added",
+                                    race: newRaceInfo
+                                }));
                             });
                         } else {
                             res.writeHead(200, { "Content-Type": "application/json" });
@@ -39,7 +41,7 @@ module.exports.default = async function handler(req, res) {
                     });
                 } else {
                     res.writeHead(200, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({ message: "email not found" }));
+                    res.end(JSON.stringify({ message: "user not found" }));
                 }
             });
 
@@ -49,15 +51,3 @@ module.exports.default = async function handler(req, res) {
         }
     });
 };
-
-function generateToken(n) {
-    const chars = [
-        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n",
-        "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"
-    ];
-    let token = "";
-    while (token.length < n) {
-        token += chars[Math.floor(chars.length * Math.random())];
-    }
-    return token;
-}

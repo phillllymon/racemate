@@ -15,6 +15,13 @@ const signUpHandler = require("./api/auth/signUp.js").default;
 const signInHandler = require("./api/auth/signIn.js").default;
 const signOutHandler = require("./api/auth/signOut.js").default;
 
+const addBoatHandler = require("./api/addBoat.js").default;
+const updateBoatHandler = require("./api/updateBoat.js").default;
+const addRaceHandler = require("./api/addRace.js").default;
+const updateRaceHandler = require("./api/updateRace.js").default;
+const addSeriesHandler = require("./api/addSeries.js").default;
+const updateSeriesHandler = require("./api/updateSeries.js").default;
+
 const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
         if (req.url === "/api/hello.js") return helloHandler(req, res);
@@ -22,6 +29,13 @@ const server = http.createServer((req, res) => {
         if (req.url === "/api/auth/signUp") return signUpHandler(req, res);
         if (req.url === "/api/auth/signIn") return signInHandler(req, res);
         if (req.url === "/api/auth/signOut") return signOutHandler(req, res);
+
+        if (req.url === "/api/addBoat") return addBoatHandler(req, res);
+        if (req.url === "/api/updateBoat") return updateBoatHandler(req, res);
+        if (req.url === "/api/addRace") return addRaceHandler(req, res);
+        if (req.url === "/api/updateRace") return updateRaceHandler(req, res);
+        if (req.url === "/api/addSeries") return addSeriesHandler(req, res);
+        if (req.url === "/api/updateSeries") return updateSeriesHandler(req, res);
 
         res.writeHead(404);
         return res.end("API route not found");
