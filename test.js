@@ -8,7 +8,7 @@ const plainPassword = "userPassword123";
 //     console.log(hash);
 // });
 
-fetch("https://racematevercel.vercel.app/api/updateSeries",  {
+fetch("https://racematevercel.vercel.app/api/retrieveData",  {
   method: "POST",
   headers: {
     "Content-Type": "application/json"
@@ -16,11 +16,8 @@ fetch("https://racematevercel.vercel.app/api/updateSeries",  {
   body: JSON.stringify({
     userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
     token: "5l9kpikjfo7bc5kv417b",
-    seriesId: 1,
-    seriesName: "Duck Dodge",
-    seriesInfo: {
-      name: "Duck Dodge"
-    }
+    target: "series",
+    subProperties: [{ key: "name", value: "Duck Dodge" }]
   })
 }).then((res) => {
   res.json().then((r) => {

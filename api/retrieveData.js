@@ -56,9 +56,12 @@ module.exports.default = async function handler(req, res) {
                                 properties.forEach((propertyPair) => {
                                     conditionStrs.push(`${propertyPair.key} = ${propertyPair.value}`);
                                 });
+
+                                // SELECT * FROM ${target}
+                                // WHERE ${conditionStrs.join(" AND ")}
+
                                 sql`
                                     SELECT * FROM ${target}
-                                    WHERE ${conditionStrs.join(" AND ")}
                                 `.then((items) => {
                                     res.writeHead(200, { "Content-Type": "application/json" });
                                     res.end(JSON.stringify({
