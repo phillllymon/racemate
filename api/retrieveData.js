@@ -60,8 +60,10 @@ module.exports.default = async function handler(req, res) {
                                 // SELECT * FROM ${target}
                                 // WHERE ${conditionStrs.join(" AND ")}
 
+                                const tableToQuery = "boats";
+
                                 sql`
-                                    SELECT * FROM ${target}
+                                    SELECT * FROM ${tableToQuery}
                                 `.then((items) => {
                                     res.writeHead(200, { "Content-Type": "application/json" });
                                     res.end(JSON.stringify({
