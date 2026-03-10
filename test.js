@@ -16,7 +16,7 @@ fetch("https://racematevercel.vercel.app/api/getBoatsByColumn",  {
   body: JSON.stringify({
     userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
     token: "5l9kpikjfo7bc5kv417b",
-    // properties: [{ key: "type", value: "San Juan 24" }],
+    properties: [{ key: "type", value: "San Juan 24" }],
     column: "owner",
     targetVal: "9d00b754-d05d-479b-b42b-ffe7200c2ce7"
   })
