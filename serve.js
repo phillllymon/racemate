@@ -21,6 +21,7 @@ const addRaceHandler = require("./api/addRace.js").default;
 const updateRaceHandler = require("./api/updateRace.js").default;
 const addSeriesHandler = require("./api/addSeries.js").default;
 const updateSeriesHandler = require("./api/updateSeries.js").default;
+const retrieveDataHandler = require("./api/retrieveData.js").default;
 
 const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
@@ -36,6 +37,7 @@ const server = http.createServer((req, res) => {
         if (req.url === "/api/updateRace") return updateRaceHandler(req, res);
         if (req.url === "/api/addSeries") return addSeriesHandler(req, res);
         if (req.url === "/api/updateSeries") return updateSeriesHandler(req, res);
+        if (req.url === "/api/retrieveData") return retrieveDataHandler(req, res);
 
         res.writeHead(404);
         return res.end("API route not found");
