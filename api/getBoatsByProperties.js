@@ -37,7 +37,7 @@ module.exports.default = async function handler(req, res) {
                                     let itemGood = true;
                                     const infoObj = JSON.parse(item["info"]);
                                     properties.forEach((propertyPair) => {
-                                        if (infoObj[propertyPair.key] !== propertyPair.value) {
+                                        if (infoObj[propertyPair.key].toLowerCase() !== propertyPair.value.toLowerCase()) {
                                             itemGood = false;
                                         }
                                     });
