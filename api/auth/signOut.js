@@ -5,6 +5,13 @@ const saltRounds = 10;
 const sql = neon(process.env.DATABASE_URL);
 
 module.exports.default = async function handler(req, res) {
+    res.setHeader('Access-Control-Allow-Origin', '*')  // or 'http://localhost:5173'
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    if (req.method === 'OPTIONS') {
+        res.status(200).end()
+        return
+    }
     if (req.method !== "POST") {
         res.writeHead(405, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ error: "Invalid method" }));
