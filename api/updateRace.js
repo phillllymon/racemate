@@ -30,6 +30,7 @@ module.exports.default = async function handler(req, res) {
                                             UPDATE races
                                             SET info = ${JSON.stringify(raceInfo)}, name = ${raceName}
                                             WHERE id = ${raceId}
+                                            RETURNING *
                                         `.then((updatedRaceInfo) => {
                                             res.writeHead(200, { "Content-Type": "application/json" });
                                             res.end(JSON.stringify({
