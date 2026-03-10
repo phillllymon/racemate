@@ -8,17 +8,15 @@ const plainPassword = "userPassword123";
 //     console.log(hash);
 // });
 
-fetch("https://racematevercel.vercel.app/api/getBoatsByColumn",  {
+fetch("https://racematevercel.vercel.app/api/auth/signUp",  {
   method: "POST",
   headers: {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
-    token: "5l9kpikjfo7bc5kv417b",
-    properties: [{ key: "type", value: "San Juan 24" }],
-    column: "id",
-    targetVal: "2"
+    username: "Robert",
+    email: "itsaRobert@gmail.com",
+    password: "password123"
   })
 }).then((res) => {
   res.json().then((r) => {

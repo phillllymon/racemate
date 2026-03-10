@@ -32,9 +32,9 @@ module.exports.default = async function handler(req, res) {
                             res.end(JSON.stringify({
                                 message: "signed up",
                                 user: {
-                                    id: newUser["id"],
-                                    name: newUser["name"],
-                                    email: newUser["email"]
+                                    id: newUser[0]["id"],
+                                    name: newUser[0]["name"],
+                                    email: newUser[0]["email"]
                                 }
                             }));
                         });
