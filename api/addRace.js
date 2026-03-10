@@ -25,7 +25,7 @@ module.exports.default = async function handler(req, res) {
                         if (tokenMatch) {
                             sql`
                                 INSERT INTO races (name, owner, info)
-                                VALUES (${raceName}, ${userId}, ${raceInfo})
+                                VALUES (${raceName}, ${userId}, ${JSON.stringify(raceInfo)})
                                 RETURNING *
                             `.then((newRaceInfo) => {
                                 res.writeHead(200, { "Content-Type": "application/json" });

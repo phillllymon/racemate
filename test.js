@@ -8,16 +8,19 @@ const plainPassword = "userPassword123";
 //     console.log(hash);
 // });
 
-fetch("https://racematevercel.vercel.app/api/auth/signIn",  {
-// fetch("http://localhost:3000/api/auth/signUp",  {
+fetch("https://racematevercel.vercel.app/api/addBoat",  {
   method: "POST",
   headers: {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    email: "itsabitrunnysir@gmail.com",
-    token: "1haph1ha5rb6fca0lvmf",
-    password: "password123"
+    userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
+    token: "5l9kpikjfo7bc5kv417b",
+    boatName: "Kari-J",
+    boatInfo: JSON.stringify({
+      name: "Kari-J",
+      type: "San Juan 28"
+    })
   })
 }).then((res) => {
   res.json().then((r) => {

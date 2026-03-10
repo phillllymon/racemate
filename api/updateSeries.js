@@ -28,7 +28,7 @@ module.exports.default = async function handler(req, res) {
                                     if (series[0]["owner"] === userId) {
                                         sql`
                                             UPDATE series
-                                            SET info = ${seriesInfo}, name = ${seriesName}
+                                            SET info = ${JSON.stringify(seriesInfo)}, name = ${seriesName}
                                             WHERE id = ${seriesId}
                                         `.then((updatedSeriesInfo) => {
                                             res.writeHead(200, { "Content-Type": "application/json" });
