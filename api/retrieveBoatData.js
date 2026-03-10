@@ -17,7 +17,7 @@ module.exports.default = async function handler(req, res) {
     req.on("end", () => {
         try {
             const parsed = JSON.parse(body);
-            const { userId, token, target, properties, subProperties } = parsed;
+            const { userId, token, properties, subProperties } = parsed;
             /* 
             subProperties: [
                 {key: "name", value: "Kari-J"},
@@ -29,33 +29,33 @@ module.exports.default = async function handler(req, res) {
                 if (users.length === 1) {
                     bcrypt.compare(token, users[0]["login_token"]).then((tokenMatch) => {
                         if (tokenMatch) {
-                            // if (subProperties) {
-                            //     sql`
-                            //         SELECT * FROM ${target}
-                            //     `.then((items) => {
-                            //         const answer = [];
-                            //         items.forEach((item) => {
-                            //             let itemGood = true;
-                            //             subProperties.forEach((propertyPair) => {
-                            //                 if (item["info"][propertyPair.key] !== propertyPair.value) {
-                            //                     itemGood = false;
-                            //                 }
-                            //             });
-                            //             if (itemGood) {
-                            //                 answer.push(item);
-                            //             }
-                            //         });
-                            //         res.writeHead(200, { "Content-Type": "application/json" });
-                            //         res.end(JSON.stringify({
-                            //             message: "search concluded",
-                            //             results: answer
-                            //         }));
-                            //     });
-                            // } else {
-                                // const conditionStrs = [];
-                                // properties.forEach((propertyPair) => {
-                                //     conditionStrs.push(`${propertyPair.key} = ${propertyPair.value}`);
-                                // });
+                            if (subProperties) {
+                                sql`
+                                    SELECT * FROM boats
+                                `.then((items) => {
+                                    const answer = [];
+                                    items.forEach((item) => {
+                                        let itemGood = true;
+                                        subProperties.forEach((propertyPair) => {
+                                            if (item["info"][propertyPair.key] !== propertyPair.value) {
+                                                itemGood = false;
+                                            }
+                                        });
+                                        if (itemGood) {
+                                            answer.push(item);
+                                        }
+                                    });
+                                    res.writeHead(200, { "Content-Type": "application/json" });
+                                    res.end(JSON.stringify({
+                                        message: "search concluded",
+                                        results: answer
+                                    }));
+                                });
+                            } else {
+                                const conditionStrs = [];
+                                properties.forEach((propertyPair) => {
+                                    conditionStrs.push(`${propertyPair.key} = ${propertyPair.value}`);
+                                });
 
                                 // SELECT * FROM ${target}
                                 // WHERE ${conditionStrs.join(" AND ")}
@@ -63,7 +63,8 @@ module.exports.default = async function handler(req, res) {
                                 const tableToQuery = "boats";
 
                                 sql`
-                                    SELECT * FROM ${tableToQuery}
+                                    SELECT * FROM boats
+                                    WHERE ${conditionStrs.join(" AND ")}
                                 `.then((items) => {
                                     res.writeHead(200, { "Content-Type": "application/json" });
                                     res.end(JSON.stringify({
@@ -71,7 +72,7 @@ module.exports.default = async function handler(req, res) {
                                         results: items
                                     }));
                                 });
-                            // }
+                            }
                         } else {
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify({ message: "token mismatch" }));
