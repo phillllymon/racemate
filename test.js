@@ -8,7 +8,7 @@ const plainPassword = "userPassword123";
 //     console.log(hash);
 // });
 
-fetch("https://racematevercel.vercel.app/api/updateBoat",  {
+fetch("https://racematevercel.vercel.app/api/updateSeries",  {
   method: "POST",
   headers: {
     "Content-Type": "application/json"
@@ -16,11 +16,10 @@ fetch("https://racematevercel.vercel.app/api/updateBoat",  {
   body: JSON.stringify({
     userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
     token: "5l9kpikjfo7bc5kv417b",
-    boatId: 1,
-    boatName: "Mirage",
-    boatInfo: {
-      name: "Mirage",
-      type: "San Juan 24"
+    seriesId: 1,
+    seriesName: "Duck Dodge",
+    seriesInfo: {
+      name: "Duck Dodge"
     }
   })
 }).then((res) => {
