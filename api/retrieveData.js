@@ -52,10 +52,10 @@ module.exports.default = async function handler(req, res) {
                             //         }));
                             //     });
                             // } else {
-                                const conditionStrs = [];
-                                properties.forEach((propertyPair) => {
-                                    conditionStrs.push(`${propertyPair.key} = ${propertyPair.value}`);
-                                });
+                                // const conditionStrs = [];
+                                // properties.forEach((propertyPair) => {
+                                //     conditionStrs.push(`${propertyPair.key} = ${propertyPair.value}`);
+                                // });
 
                                 // SELECT * FROM ${target}
                                 // WHERE ${conditionStrs.join(" AND ")}
