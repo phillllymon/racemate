@@ -8,7 +8,7 @@ const plainPassword = "userPassword123";
 //     console.log(hash);
 // });
 
-fetch("https://racematevercel.vercel.app/api/retrieveData",  {
+fetch("https://racematevercel.vercel.app/api/retrieveBoatData",  {
   method: "POST",
   headers: {
     "Content-Type": "application/json"
