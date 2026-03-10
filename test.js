@@ -17,7 +17,7 @@ fetch("https://racematevercel.vercel.app/api/retrieveData",  {
     userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
     // userId: "poop",
     token: "5l9kpikjfo7bc5kv417b",
-    properties: [{ key: "name", value: "Duck Dodge" }],
+    // properties: [{ key: "name", value: "Duck Dodge" }],
     subProperties: [{ key: "name", value: "Duck Dodge" }]
   })
 }).then((res) => {
