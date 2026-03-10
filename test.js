@@ -14,7 +14,8 @@ fetch("https://racematevercel.vercel.app/api/retrieveData",  {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
+    // userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
+    userId: "poop",
     token: "5l9kpikjfo7bc5kv417b",
     target: "series",
     properties: [{ key: "name", value: "Duck Dodge" }],
