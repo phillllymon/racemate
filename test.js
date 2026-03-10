@@ -18,7 +18,7 @@ fetch("https://racematevercel.vercel.app/api/retrieveBoatData",  {
     // userId: "poop",
     token: "5l9kpikjfo7bc5kv417b",
     // properties: [{ key: "name", value: "Duck Dodge" }],
-    subProperties: [{ key: "name", value: "Kari-J" }]
+    subProperties: [{ key: "type", value: "San Juan 24" }]
   })
 }).then((res) => {
   res.json().then((r) => {
