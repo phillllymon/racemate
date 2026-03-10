@@ -30,48 +30,43 @@ module.exports.default = async function handler(req, res) {
                     bcrypt.compare(token, users[0]["login_token"]).then((tokenMatch) => {
                         if (tokenMatch) {
                             // if (subProperties) {
-                            //     sql`
-                            //         SELECT * FROM boats
-                            //     `.then((items) => {
-                            //         const answer = [];
-                            //         items.forEach((item) => {
-                            //             let itemGood = true;
-                            //             subProperties.forEach((propertyPair) => {
-                            //                 if (item["info"][propertyPair.key] !== propertyPair.value) {
-                            //                     itemGood = false;
-                            //                 }
-                            //             });
-                            //             if (itemGood) {
-                            //                 answer.push(item);
-                            //             }
-                            //         });
-                            //         res.writeHead(200, { "Content-Type": "application/json" });
-                            //         res.end(JSON.stringify({
-                            //             message: "search concluded",
-                            //             results: answer
-                            //         }));
-                            //     });
-                            // } else {
-                                const conditionStrs = [];
-                                properties.forEach((propertyPair) => {
-                                    conditionStrs.push(`${propertyPair.key} = ${propertyPair.value}`);
-                                });
-
-                                // SELECT * FROM ${target}
-                                // WHERE ${conditionStrs.join(" AND ")}
-
-                                const tableToQuery = "boats";
-
                                 sql`
                                     SELECT * FROM boats
-                                    WHERE ${conditionStrs.join(" AND ")}
                                 `.then((items) => {
+                                    const answer = [];
+                                    items.forEach((item) => {
+                                        let itemGood = true;
+                                        subProperties.forEach((propertyPair) => {
+                                            if (item["info"][propertyPair.key] !== propertyPair.value) {
+                                                itemGood = false;
+                                            }
+                                        });
+                                        if (itemGood) {
+                                            answer.push(item);
+                                        }
+                                    });
                                     res.writeHead(200, { "Content-Type": "application/json" });
                                     res.end(JSON.stringify({
                                         message: "search concluded",
-                                        results: items
+                                        results: answer
                                     }));
                                 });
+                            // } else {
+                            //     const conditionStrs = [];
+                            //     properties.forEach((propertyPair) => {
+                            //         conditionStrs.push(`${propertyPair.key} = ${propertyPair.value}`);
+                            //     });
+
+                            //     sql`
+                            //         SELECT * FROM boats
+                            //         WHERE ${conditionStrs.join(" AND ")}
+                            //     `.then((items) => {
+                            //         res.writeHead(200, { "Content-Type": "application/json" });
+                            //         res.end(JSON.stringify({
+                            //             message: "search concluded",
+                            //             results: items
+                            //         }));
+                            //     });
                             // }
                         } else {
                             res.writeHead(200, { "Content-Type": "application/json" });
