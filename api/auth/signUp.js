@@ -9,6 +9,10 @@ module.exports.default = async function handler(req, res) {
         res.writeHead(405, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ error: "Invalid method" }));
     }
+    if (req.method === 'OPTIONS') {
+        res.status(200).end()
+        return
+    }
     res.setHeader('Access-Control-Allow-Origin', '*')  // or 'http://localhost:5173'
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
