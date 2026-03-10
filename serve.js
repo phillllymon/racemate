@@ -23,6 +23,10 @@ const addSeriesHandler = require("./api/addSeries.js").default;
 const updateSeriesHandler = require("./api/updateSeries.js").default;
 const getBoatsByPropertiesHandler = require("./api/getBoatsByProperties.js").default;
 const getBoatsByColumnHandler = require("./api/getBoatsByColumn.js").default;
+const getRacesByPropertiesHandler = require("./api/getRacesByProperties.js").default;
+const getRacesByColumnHandler = require("./api/getRacesByColumn.js").default;
+const getSeriesByPropertiesHandler = require("./api/getSeriesByProperties.js").default;
+const getSeriesByColumnHandler = require("./api/getSeriesByColumn.js").default;
 
 const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
@@ -40,6 +44,10 @@ const server = http.createServer((req, res) => {
         if (req.url === "/api/updateSeries") return updateSeriesHandler(req, res);
         if (req.url === "/api/getBoatsByProperties") return getBoatsByPropertiesHandler(req, res);
         if (req.url === "/api/getBoatsByColumn") return getBoatsByColumnHandler(req, res);
+        if (req.url === "/api/getRacesByProperties") return getRacesByPropertiesHandler(req, res);
+        if (req.url === "/api/getRacesByColumn") return getRacesByColumnHandler(req, res);
+        if (req.url === "/api/getSeriesByProperties") return getSeriesByPropertiesHandler(req, res);
+        if (req.url === "/api/getSeriesByColumn") return getSeriesByColumnHandler(req, res);
 
         res.writeHead(404);
         return res.end("API route not found");
