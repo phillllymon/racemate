@@ -17,9 +17,9 @@ module.exports.default = async function handler(req, res) {
     req.on("end", () => {
         try {
             const parsed = JSON.parse(body);
-            const { userId, token, subProperties } = parsed;
+            const { userId, token, properties } = parsed;
             /* 
-            subProperties: [
+            properties: [
                 {key: "name", value: "Kari-J"},
                 {key: "boatType", value: "J-24"}
             ]
@@ -36,7 +36,7 @@ module.exports.default = async function handler(req, res) {
                                 items.forEach((item) => {
                                     let itemGood = true;
                                     const infoObj = JSON.parse(item["info"]);
-                                    subProperties.forEach((propertyPair) => {
+                                    properties.forEach((propertyPair) => {
                                         if (infoObj[propertyPair.key] !== propertyPair.value) {
                                             itemGood = false;
                                         }
