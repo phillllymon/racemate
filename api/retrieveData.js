@@ -29,29 +29,29 @@ module.exports.default = async function handler(req, res) {
                 if (users.length === 1) {
                     bcrypt.compare(token, users[0]["login_token"]).then((tokenMatch) => {
                         if (tokenMatch) {
-                            if (subProperties) {
-                                sql`
-                                    SELECT * FROM ${target}
-                                `.then((items) => {
-                                    const answer = [];
-                                    items.forEach((item) => {
-                                        let itemGood = true;
-                                        subProperties.forEach((propertyPair) => {
-                                            if (item["info"][propertyPair.key] !== propertyPair.value) {
-                                                itemGood = false;
-                                            }
-                                        });
-                                        if (itemGood) {
-                                            answer.push(item);
-                                        }
-                                    });
-                                    res.writeHead(200, { "Content-Type": "application/json" });
-                                    res.end(JSON.stringify({
-                                        message: "search concluded",
-                                        results: answer
-                                    }));
-                                });
-                            } else {
+                            // if (subProperties) {
+                            //     sql`
+                            //         SELECT * FROM ${target}
+                            //     `.then((items) => {
+                            //         const answer = [];
+                            //         items.forEach((item) => {
+                            //             let itemGood = true;
+                            //             subProperties.forEach((propertyPair) => {
+                            //                 if (item["info"][propertyPair.key] !== propertyPair.value) {
+                            //                     itemGood = false;
+                            //                 }
+                            //             });
+                            //             if (itemGood) {
+                            //                 answer.push(item);
+                            //             }
+                            //         });
+                            //         res.writeHead(200, { "Content-Type": "application/json" });
+                            //         res.end(JSON.stringify({
+                            //             message: "search concluded",
+                            //             results: answer
+                            //         }));
+                            //     });
+                            // } else {
                                 const conditionStrs = [];
                                 properties.forEach((propertyPair) => {
                                     conditionStrs.push(`${propertyPair.key} = ${propertyPair.value}`);
@@ -69,7 +69,7 @@ module.exports.default = async function handler(req, res) {
                                         results: items
                                     }));
                                 });
-                            }
+                            // }
                         } else {
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify({ message: "token mismatch" }));
