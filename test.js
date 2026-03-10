@@ -8,14 +8,15 @@ const plainPassword = "userPassword123";
 //     console.log(hash);
 // });
 
-fetch("https://racematevercel.vercel.app/api/auth/signOut",  {
+fetch("https://racematevercel.vercel.app/api/getBoatsByProperties",  {
   method: "POST",
   headers: {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    userId: "f51db4b8-816f-4ff8-b42c-1c22214734e4",
-    token: "u6eg1x82zthfyi9z1q56"
+    userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
+    token: "er8qdttf2xyoxj0kqk7c",
+    properties: [{ key: "name", value: "Cake or Death" }]
   })
 }).then((res) => {
   res.json().then((r) => {
