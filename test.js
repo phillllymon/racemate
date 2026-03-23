@@ -8,18 +8,83 @@ const plainPassword = "userPassword123";
 //     console.log(hash);
 // });
 
-fetch("https://racematevercel.vercel.app/api/getBoatsByProperties",  {
+fetch("https://racematevercel.vercel.app/api/updateBoat",  {
   method: "POST",
   headers: {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    userId: "9d00b754-d05d-479b-b42b-ffe7200c2ce7",
-    token: "er8qdttf2xyoxj0kqk7c",
-    properties: [{ key: "name", value: "Cake or Death" }]
+    userId: "6c990ce3-1ceb-44c5-9bdb-007c029081d2",
+    token: "65q6cg8l1z9e1b7bvpqd",
+    boatId: "4",
+    boatName: "Kari-J 2",
+    boatInfo: {"name":"Kari-J 2","type":"J-24"}
   })
 }).then((res) => {
   res.json().then((r) => {
     console.log(r);
   });
 });
+
+// fetch("https://racematevercel.vercel.app/api/addBoat",  {
+//   method: "POST",
+//   headers: {
+//     "Content-Type": "application/json"
+//   },
+//   body: JSON.stringify({
+//     userId: "6c990ce3-1ceb-44c5-9bdb-007c029081d2",
+//     token: "65q6cg8l1z9e1b7bvpqd",
+//     boatName: "Kari-J",
+//     boatInfo: {"name":"Kari-J","type":"J-24"}
+//   })
+// }).then((res) => {
+//   res.json().then((r) => {
+//     console.log(r);
+//   });
+// });
+
+// fetch("https://racematevercel.vercel.app/api/auth/signUp",  {
+//   method: "POST",
+//   headers: {
+//     "Content-Type": "application/json"
+//   },
+//   body: JSON.stringify({
+//     username: "Parker",
+//     email: "rparkerharris@gmail.com",
+//     password: "password123"
+//   })
+// }).then((res) => {
+//   res.json().then((r) => {
+//     console.log(r);
+//   });
+// });
+
+// fetch("https://racematevercel.vercel.app/api/auth/signIn",  {
+//   method: "POST",
+//   headers: {
+//     "Content-Type": "application/json"
+//   },
+//   body: JSON.stringify({
+//     email: "rparkerharris@gmail.com",
+//     password: "password123"
+//   })
+// }).then((res) => {
+//   res.json().then((r) => {
+//     console.log(r);
+//   });
+// });
+
+// fetch("https://racematevercel.vercel.app/api/auth/signOut",  {
+//   method: "POST",
+//   headers: {
+//     "Content-Type": "application/json"
+//   },
+//   body: JSON.stringify({
+//     userId: "6c990ce3-1ceb-44c5-9bdb-007c029081d2",
+//     token: "3vw6a0pri6ut6nvmsyih"
+//   })
+// }).then((res) => {
+//   res.json().then((r) => {
+//     console.log(r);
+//   });
+// });
