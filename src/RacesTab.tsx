@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useRaces } from "./RaceContext";
+import { useTime } from "./TimeContext";
 import type { Race, Series, Boat } from "./RaceContext";
-import type { BoatInfo, RaceBoatEntry } from "./api";
+import type { BoatInfo, RaceBoatEntry, RaceInfo } from "./api";
 
 // ---- Edit boat overlay ----
 
@@ -21,12 +22,11 @@ function EditBoatForm({
 
   const [name, setName] = useState(boat.info.name || boat.name);
   const [sailNumber, setSailNumber] = useState(boat.info.sailNumber || "");
-  const [boatClass, setBoatClass] = useState(raceEntry.class || "");
   const [boatType, setBoatType] = useState(boat.info.type || "");
   const [skipper, setSkipper] = useState(boat.info.skipper || "");
   const [phrf, setPhrf] = useState(boat.info.phrf != null ? String(boat.info.phrf) : "");
+  const [boatClass, setBoatClass] = useState(raceEntry.class || "");
 
-  // Get existing classes in this race for quick-pick
   const existingClasses = Array.from(
     new Set((race.info.boats || []).map((b) => b.class).filter(Boolean))
   );
@@ -35,7 +35,7 @@ function EditBoatForm({
     // Update the boat's class in the race entry
     const updatedBoats = (race.info.boats || []).map((b) => {
       if (b.boatId !== boat.id) return b;
-      return { ...b, class: boatClass.trim() || "Default" };
+      return { ...b, class: boatClass.trim() || raceEntry.class };
     });
     updateRaceData(raceId, race.name, { ...race.info, boats: updatedBoats });
 
@@ -50,10 +50,10 @@ function EditBoatForm({
     else delete updatedInfo.type;
     if (skipper.trim()) updatedInfo.skipper = skipper.trim();
     else delete updatedInfo.skipper;
-    if (boatClass.trim()) updatedInfo.class = boatClass.trim();
-    else delete updatedInfo.class;
     if (phrf.trim() && !isNaN(Number(phrf))) updatedInfo.phrf = Number(phrf);
     else delete updatedInfo.phrf;
+    // Don't store class on the boat record itself
+    delete updatedInfo.class;
 
     updateBoatData(boat.id, name.trim() || boat.name, updatedInfo);
     onDone();
@@ -69,20 +69,18 @@ function EditBoatForm({
       <input className="login-input" placeholder="PHRF rating" value={phrf} onChange={(e) => setPhrf(e.target.value)} inputMode="numeric" />
 
       <div className="edit-class-section">
-        <input className="login-input" placeholder="Class" value={boatClass} onChange={(e) => setBoatClass(e.target.value)} />
-        {existingClasses.length > 0 && (
-          <div className="edit-class-picks">
-            {existingClasses.map((cls) => (
-              <button
-                key={cls}
-                className={`edit-class-chip ${cls === boatClass ? "edit-class-chip--active" : ""}`}
-                onClick={() => setBoatClass(cls)}
-              >
-                {cls}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="start-classes-label">Move to class:</div>
+        <div className="edit-class-picks">
+          {existingClasses.map((cls) => (
+            <button
+              key={cls}
+              className={`edit-class-chip ${cls === boatClass ? "edit-class-chip--active" : ""}`}
+              onClick={() => setBoatClass(cls)}
+            >
+              {cls}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="races-form-actions">
@@ -129,16 +127,71 @@ function CreateSeriesForm({ onDone }: { onDone: () => void }) {
 
 // ---- Create race form ----
 
-function CreateRaceForm({ seriesId, onDone }: { seriesId: number | null; onDone: () => void }) {
+function CreateRaceForm({
+  seriesId,
+  previousRace,
+  onDone,
+}: {
+  seriesId: number;
+  previousRace: Race | null;
+  onDone: () => void;
+}) {
   const { createRace } = useRaces();
+  const { now } = useTime();
   const [name, setName] = useState("");
   const [autoCheckIn, setAutoCheckIn] = useState(true);
+  const [copyPrevious, setCopyPrevious] = useState(previousRace != null);
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (!name.trim()) return;
     setBusy(true);
-    await createRace(name.trim(), seriesId, { autoCheckIn });
+
+    const raceInfo: Partial<RaceInfo> = { autoCheckIn };
+
+    if (copyPrevious && previousRace) {
+      const prevBoats = (previousRace.info.boats || []).map((b) => ({
+        ...b,
+        finishTime: null,
+        lapsCompleted: 0,
+        lapTimes: [],
+        status: autoCheckIn ? "checked-in" : "signed-up",
+      }));
+      raceInfo.boats = prevBoats;
+
+      if (previousRace.info.classLaps) {
+        raceInfo.classLaps = previousRace.info.classLaps;
+      }
+
+      const prevStarts = previousRace.info.starts || [];
+      if (prevStarts.length > 0) {
+        const sortedPrev = [...prevStarts].sort((a, b) => {
+          if (a.startTime == null && b.startTime == null) return 0;
+          if (a.startTime == null) return 1;
+          if (b.startTime == null) return -1;
+          return a.startTime - b.startTime;
+        });
+
+        const firstPrevTime = sortedPrev[0]?.startTime;
+        const firstNewTime = now + 10 * 60 * 1000;
+
+        const newStarts = sortedPrev.map((s) => {
+          let newStartTime: number | null = null;
+          if (s.startTime != null && firstPrevTime != null) {
+            const offset = s.startTime - firstPrevTime;
+            newStartTime = firstNewTime + offset;
+          }
+          return {
+            ...s,
+            id: Math.random().toString(36).slice(2, 10),
+            startTime: newStartTime,
+          };
+        });
+        raceInfo.starts = newStarts;
+      }
+    }
+
+    await createRace(name.trim(), seriesId, raceInfo);
     setName("");
     setBusy(false);
     onDone();
@@ -160,6 +213,16 @@ function CreateRaceForm({ seriesId, onDone }: { seriesId: number | null; onDone:
         />
         <span>Auto check-in boats</span>
       </label>
+      {previousRace && (
+        <label className="races-checkbox">
+          <input
+            type="checkbox"
+            checked={copyPrevious}
+            onChange={(e) => setCopyPrevious(e.target.checked)}
+          />
+          <span>Copy boats, classes &amp; starts from {previousRace.name}</span>
+        </label>
+      )}
       <div className="races-form-actions">
         <button className="btn btn-primary" onClick={submit} disabled={busy || !name.trim()}>
           {busy ? "..." : "Create Race"}
@@ -170,16 +233,23 @@ function CreateRaceForm({ seriesId, onDone }: { seriesId: number | null; onDone:
   );
 }
 
-// ---- Add boat form ----
+// ---- Add boat form (within a specific class) ----
 
-function AddBoatForm({ raceId, onDone }: { raceId: number; onDone: () => void }) {
+function AddBoatForm({
+  raceId,
+  className,
+  onDone,
+}: {
+  raceId: number;
+  className: string;
+  onDone: () => void;
+}) {
   const { races, boats, createBoat, updateRaceData } = useRaces();
   const race = races.find((r) => r.id === raceId)!;
 
   const [mode, setMode] = useState<"choose" | "new" | "existing">("choose");
   const [name, setName] = useState("");
   const [sailNumber, setSailNumber] = useState("");
-  const [boatClass, setBoatClass] = useState("");
   const [boatType, setBoatType] = useState("");
   const [phrf, setPhrf] = useState("");
   const [search, setSearch] = useState("");
@@ -196,15 +266,14 @@ function AddBoatForm({ raceId, onDone }: { raceId: number; onDone: () => void })
       b.name.toLowerCase().includes(s) ||
       (info.sailNumber || "").toLowerCase().includes(s) ||
       (info.type || "").toLowerCase().includes(s) ||
-      (info.class || "").toLowerCase().includes(s) ||
       (info.skipper || "").toLowerCase().includes(s)
     );
   });
 
-  const addBoatToRace = (boatId: number, cls: string) => {
+  const addBoatToRace = (boatId: number) => {
     const entry: RaceBoatEntry = {
       boatId,
-      class: cls || "Default",
+      class: className,
       status: race.info.autoCheckIn ? "checked-in" : "signed-up",
     };
     const updatedInfo = {
@@ -220,25 +289,21 @@ function AddBoatForm({ raceId, onDone }: { raceId: number; onDone: () => void })
     const info: BoatInfo = { name: name.trim() };
     if (sailNumber.trim()) info.sailNumber = sailNumber.trim();
     if (boatType.trim()) info.type = boatType.trim();
-    if (boatClass.trim()) info.class = boatClass.trim();
     if (phrf.trim()) info.phrf = Number(phrf);
 
     const boat = await createBoat(name.trim(), info);
-    addBoatToRace(boat.id, boatClass.trim() || "Default");
+    addBoatToRace(boat.id);
 
-    // Clear form and go back to list automatically
     setName("");
     setSailNumber("");
-    setBoatClass("");
     setBoatType("");
     setPhrf("");
     setBusy(false);
     onDone();
   };
 
-  const addExisting = (boat: { id: number; info: BoatInfo }) => {
-    addBoatToRace(boat.id, boat.info.class || "Default");
-    // Stay in existing mode so user can keep adding
+  const addExisting = (boat: { id: number }) => {
+    addBoatToRace(boat.id);
   };
 
   if (mode === "choose") {
@@ -278,7 +343,7 @@ function AddBoatForm({ raceId, onDone }: { raceId: number; onDone: () => void })
             >
               <span className="races-boat-name">{boat.name}</span>
               <span className="races-boat-detail">
-                {[boat.info.sailNumber, boat.info.type, boat.info.class]
+                {[boat.info.sailNumber, boat.info.type]
                   .filter(Boolean)
                   .join(" · ")}
               </span>
@@ -296,7 +361,6 @@ function AddBoatForm({ raceId, onDone }: { raceId: number; onDone: () => void })
     <div className="races-form">
       <input className="login-input" placeholder="Boat name *" value={name} onChange={(e) => setName(e.target.value)} />
       <input className="login-input" placeholder="Sail number" value={sailNumber} onChange={(e) => setSailNumber(e.target.value)} />
-      <input className="login-input" placeholder="Class" value={boatClass} onChange={(e) => setBoatClass(e.target.value)} />
       <input className="login-input" placeholder="Boat type" value={boatType} onChange={(e) => setBoatType(e.target.value)} />
       <input className="login-input" placeholder="PHRF rating" value={phrf} onChange={(e) => setPhrf(e.target.value)} inputMode="numeric" />
       <div className="races-form-actions">
@@ -309,39 +373,131 @@ function AddBoatForm({ raceId, onDone }: { raceId: number; onDone: () => void })
   );
 }
 
+// ---- Class section within a race ----
+
+function ClassSection({
+  className,
+  entries,
+  raceId,
+  race,
+  boats,
+  onEditBoat,
+}: {
+  className: string;
+  entries: RaceBoatEntry[];
+  raceId: number;
+  race: Race;
+  boats: Boat[];
+  onEditBoat: (boatId: number) => void;
+}) {
+  const { updateRaceData } = useRaces();
+  const [expanded, setExpanded] = useState(true);
+  const [addingBoat, setAddingBoat] = useState(false);
+
+  const getBoat = (boatId: number) => boats.find((b) => b.id === boatId);
+
+  const removeBoat = (boatId: number) => {
+    const raceBoats = race.info.boats || [];
+    updateRaceData(raceId, race.name, {
+      ...race.info,
+      boats: raceBoats.filter((b) => b.boatId !== boatId),
+    });
+  };
+
+  return (
+    <div className="race-class-section">
+      <button className="race-class-section-header" onClick={() => setExpanded(!expanded)}>
+        <span className="race-class-section-name">{className}</span>
+        <span className="race-card-count">{entries.length} boat{entries.length !== 1 ? "s" : ""}</span>
+        <span className={`race-card-chevron ${expanded ? "race-card-chevron--open" : ""}`}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="race-class-section-body">
+          {entries.map((entry) => {
+            const boat = getBoat(entry.boatId);
+            return (
+              <div key={entry.boatId} className="race-boat-row">
+                <button
+                  className="race-boat-row-info"
+                  onClick={() => onEditBoat(entry.boatId)}
+                >
+                  <span className="race-boat-row-name">
+                    {boat ? boat.name : `Boat #${entry.boatId}`}
+                  </span>
+                  {boat?.info.sailNumber && (
+                    <span className="race-boat-row-sail">{boat.info.sailNumber}</span>
+                  )}
+                </button>
+                <span className="race-boat-row-status">{entry.status}</span>
+                <button
+                  className="race-boat-row-remove"
+                  onClick={() => removeBoat(entry.boatId)}
+                  aria-label="Remove boat from race"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+
+          {entries.length === 0 && !addingBoat && (
+            <p className="races-empty">No boats in this class</p>
+          )}
+
+          {addingBoat ? (
+            <AddBoatForm raceId={raceId} className={className} onDone={() => setAddingBoat(false)} />
+          ) : (
+            <button className="btn btn-secondary btn-sm" onClick={() => setAddingBoat(true)}>
+              + Add Boats to {className}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- Race card ----
 
 function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   const { selectedRaceId, selectRace, updateRaceData, boats } = useRaces();
   const [expanded, setExpanded] = useState(false);
-  const [addingBoat, setAddingBoat] = useState(false);
   const [editingBoatId, setEditingBoatId] = useState<number | null>(null);
   const [editingRace, setEditingRace] = useState(false);
+  const [addingClass, setAddingClass] = useState(false);
+  const [newClassName, setNewClassName] = useState("");
+  const [emptyClasses, setEmptyClasses] = useState<string[]>([]);
   const [editName, setEditName] = useState(race.name);
   const [editAutoCheckIn, setEditAutoCheckIn] = useState(race.info.autoCheckIn ?? true);
   const [editClassLaps, setEditClassLaps] = useState<Record<string, number>>({});
   const isSelected = selectedRaceId === race.id;
   const raceBoats = race.info.boats || [];
 
-  // Group by class
-  const byClass = new Map<string, RaceBoatEntry[]>();
+  // Get ordered list of classes (from boats + any empty classes created by user)
+  const classNames: string[] = [];
   raceBoats.forEach((entry) => {
     const cls = entry.class || "Default";
-    if (!byClass.has(cls)) byClass.set(cls, []);
+    if (!classNames.includes(cls)) classNames.push(cls);
+  });
+  emptyClasses.forEach((cls) => {
+    if (!classNames.includes(cls)) classNames.push(cls);
+  });
+
+  // Group by class
+  const byClass = new Map<string, RaceBoatEntry[]>();
+  classNames.forEach((cls) => byClass.set(cls, []));
+  raceBoats.forEach((entry) => {
+    const cls = entry.class || "Default";
     byClass.get(cls)!.push(entry);
   });
 
   const getBoat = (boatId: number): Boat | undefined => {
     return boats.find((bt) => bt.id === boatId);
-  };
-
-  const removeBoat = (boatId: number) => {
-    const updatedInfo = {
-      ...race.info,
-      boats: raceBoats.filter((b) => b.boatId !== boatId),
-    };
-    updateRaceData(race.id, race.name, updatedInfo);
-    if (editingBoatId === boatId) setEditingBoatId(null);
   };
 
   const saveRaceEdit = () => {
@@ -359,7 +515,7 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
     setEditAutoCheckIn(race.info.autoCheckIn ?? true);
     const existing = (race.info.classLaps || {}) as Record<string, number>;
     const laps: Record<string, number> = {};
-    Array.from(byClass.keys()).forEach((cls) => {
+    classNames.forEach((cls) => {
       laps[cls] = existing[cls] || 1;
     });
     setEditClassLaps(laps);
@@ -376,7 +532,9 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
       <div className="race-card-header">
         <button className="race-card-header-toggle" onClick={() => setExpanded(!expanded)}>
           <span className="race-card-name">{race.name}</span>
-          <span className="race-card-count">{raceBoats.length} boat{raceBoats.length !== 1 ? "s" : ""}</span>
+          <span className="race-card-count">
+            {classNames.length} class{classNames.length !== 1 ? "es" : ""} · {raceBoats.length} boat{raceBoats.length !== 1 ? "s" : ""}
+          </span>
           <span className={`race-card-chevron ${expanded ? "race-card-chevron--open" : ""}`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="9 6 15 12 9 18" />
@@ -406,7 +564,6 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
 
           {editingRace ? (
             <div className="races-form">
-              <div className="edit-boat-title">Edit Race</div>
               <input
                 className="login-input"
                 placeholder="Race name"
@@ -460,47 +617,55 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
             />
           ) : (
             <>
-              {Array.from(byClass.entries()).map(([cls, entries]) => (
-                <div key={cls} className="race-class-group">
-                  <div className="race-class-header">{cls}</div>
-                  {entries.map((entry) => {
-                    const boat = getBoat(entry.boatId);
-                    return (
-                      <div key={entry.boatId} className="race-boat-row">
-                        <button
-                          className="race-boat-row-info"
-                          onClick={() => setEditingBoatId(entry.boatId)}
-                        >
-                          <span className="race-boat-row-name">
-                            {boat ? boat.name : `Boat #${entry.boatId}`}
-                          </span>
-                          {boat?.info.sailNumber && (
-                            <span className="race-boat-row-sail">{boat.info.sailNumber}</span>
-                          )}
-                        </button>
-                        <span className="race-boat-row-status">{entry.status}</span>
-                        <button
-                          className="race-boat-row-remove"
-                          onClick={() => removeBoat(entry.boatId)}
-                          aria-label="Remove boat from race"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
+              {/* Classes */}
+              {classNames.map((cls) => (
+                <ClassSection
+                  key={cls}
+                  className={cls}
+                  entries={byClass.get(cls) || []}
+                  raceId={race.id}
+                  race={race}
+                  boats={boats}
+                  onEditBoat={setEditingBoatId}
+                />
               ))}
 
-              {raceBoats.length === 0 && !addingBoat && (
-                <p className="races-empty">No boats yet</p>
+              {classNames.length === 0 && !addingClass && (
+                <p className="races-empty">No classes yet — add a class to get started</p>
               )}
 
-              {addingBoat ? (
-                <AddBoatForm raceId={race.id} onDone={() => setAddingBoat(false)} />
+              {/* Add class */}
+              {addingClass ? (
+                <div className="races-form">
+                  <input
+                    className="login-input"
+                    placeholder="Class name"
+                    value={newClassName}
+                    onChange={(e) => setNewClassName(e.target.value)}
+                  />
+                  <div className="races-form-actions">
+                    <button
+                      className="btn btn-primary"
+                      disabled={!newClassName.trim()}
+                      onClick={() => {
+                        const name = newClassName.trim();
+                        if (name && !classNames.includes(name)) {
+                          setEmptyClasses((prev) => [...prev, name]);
+                        }
+                        setAddingClass(false);
+                        setNewClassName("");
+                      }}
+                    >
+                      Create Class
+                    </button>
+                    <button className="btn btn-secondary" onClick={() => { setAddingClass(false); setNewClassName(""); }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               ) : (
-                <button className="btn btn-secondary" onClick={() => setAddingBoat(true)}>
-                  + Add Boats
+                <button className="btn btn-secondary" onClick={() => setAddingClass(true)}>
+                  + Add Class
                 </button>
               )}
             </>
@@ -584,7 +749,11 @@ function SeriesCard({ s }: { s: Series }) {
               )}
 
               {addingRace ? (
-                <CreateRaceForm seriesId={s.id} onDone={() => setAddingRace(false)} />
+                <CreateRaceForm
+                  seriesId={s.id}
+                  previousRace={seriesRaces.length > 0 ? seriesRaces[seriesRaces.length - 1] : null}
+                  onDone={() => setAddingRace(false)}
+                />
               ) : (
                 <button className="btn btn-secondary" onClick={() => setAddingRace(true)}>
                   + Add Race
@@ -602,7 +771,7 @@ function SeriesCard({ s }: { s: Series }) {
 
 export default function RacesTab() {
   const { series, loading } = useRaces();
-  const [showForm, setShowForm] = useState<"none" | "series" | "race">("none");
+  const [showForm, setShowForm] = useState(false);
 
   if (loading) {
     return <div className="tab-placeholder"><p>Loading...</p></div>;
@@ -610,26 +779,18 @@ export default function RacesTab() {
 
   return (
     <div className="races-tab">
-      <div className="races-actions">
-        <button className="btn btn-primary" onClick={() => setShowForm("series")}>
-          New Series
-        </button>
-        <button className="btn btn-secondary" onClick={() => setShowForm("race")}>
-          Quick Race
-        </button>
-      </div>
+      <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+        New Series
+      </button>
 
-      {showForm === "series" && (
-        <CreateSeriesForm onDone={() => setShowForm("none")} />
-      )}
-      {showForm === "race" && (
-        <CreateRaceForm seriesId={null} onDone={() => setShowForm("none")} />
+      {showForm && (
+        <CreateSeriesForm onDone={() => setShowForm(false)} />
       )}
 
-      {series.length === 0 && showForm === "none" && (
+      {series.length === 0 && !showForm && (
         <div className="races-empty-state">
-          <p>No races yet</p>
-          <p className="races-empty-hint">Create a series or a quick race to get started</p>
+          <p>No series yet</p>
+          <p className="races-empty-hint">Create a series then add a race to it</p>
         </div>
       )}
 

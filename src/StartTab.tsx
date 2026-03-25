@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useRaces } from "./RaceContext";
 import { useTime } from "./TimeContext";
 import type { StartInfo, SequenceStep, RaceBoatEntry } from "./api";
@@ -711,9 +712,9 @@ function StartCard({
 
   return (
     <div className={`start-card ${phase === "starting" ? "start-card--attention" : ""}`}>
-      {/* Notifications overlay */}
-      {activeNotifications.length > 0 && (
-        <div className="seq-notification-stack">
+      {/* Notifications rendered as fixed banners at top of screen */}
+      {activeNotifications.length > 0 && createPortal(
+        <div className="seq-notification-overlay">
           {activeNotifications.map((step) => (
             <SequenceNotification
               key={step.offsetSeconds}
@@ -722,7 +723,8 @@ function StartCard({
               onDismiss={() => dismissNotification(step.offsetSeconds)}
             />
           ))}
-        </div>
+        </div>,
+        document.body
       )}
 
       <div className="start-card-header">

@@ -6,7 +6,7 @@ interface Tab {
 }
 
 const TABS: Tab[] = [
-  { id: "races", label: "Races" },
+  { id: "races", label: "Series" },
   { id: "start", label: "Start" },
   { id: "chart", label: "Chart" },
   { id: "finish", label: "Finish" },

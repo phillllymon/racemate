@@ -17,7 +17,9 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function formatFinishTime(ms: number): string {
+// ---- Search results ----
+
+function formatFinishTimeShort(ms: number): string {
   const d = new Date(ms);
   const h = String(d.getHours()).padStart(2, "0");
   const m = String(d.getMinutes()).padStart(2, "0");
@@ -25,21 +27,25 @@ function formatFinishTime(ms: number): string {
   return `${h}:${m}:${s}`;
 }
 
-// ---- Search results ----
-
 function SearchResults({
   query,
   boats,
   raceBoats,
   stagedIds,
   onStage,
+  onAdjustFinish,
+  onUnfinish,
 }: {
   query: string;
   boats: Boat[];
   raceBoats: RaceBoatEntry[];
   stagedIds: Set<number>;
   onStage: (boatId: number) => void;
+  onAdjustFinish: (boatId: number, delta: number) => void;
+  onUnfinish: (boatId: number) => void;
 }) {
+  const [editingId, setEditingId] = useState<number | null>(null);
+
   const q = query.trim().toLowerCase();
   const results = raceBoats.filter((rb) => {
     if (!q) return true;
@@ -68,24 +74,50 @@ function SearchResults({
         const boat = boats.find((b) => b.id === rb.boatId);
         const alreadyStaged = stagedIds.has(rb.boatId);
         const alreadyFinished = rb.finishTime != null;
+        const isEditing = editingId === rb.boatId;
+
         return (
-          <button
-            key={rb.boatId}
-            className={`finish-search-item ${alreadyStaged ? "finish-search-item--staged" : ""} ${alreadyFinished ? "finish-search-item--finished" : ""}`}
-            onClick={() => !alreadyStaged && onStage(rb.boatId)}
-            disabled={alreadyStaged || alreadyFinished}
-          >
-            <div className="finish-search-item-info">
-              <span className="checkin-boat-name">{boat?.name || `#${rb.boatId}`}</span>
-              {boat?.info.sailNumber && (
-                <span className="checkin-boat-sail">{boat.info.sailNumber}</span>
-              )}
-              <span className="checkin-boat-class">{rb.class}</span>
-            </div>
-            <span className="finish-search-item-status">
-              {alreadyFinished ? "Finished" : alreadyStaged ? "Staged" : rb.status}
-            </span>
-          </button>
+          <div key={rb.boatId} className="finish-search-entry">
+            <button
+              className={`finish-search-item ${alreadyStaged ? "finish-search-item--staged" : ""} ${alreadyFinished ? "finish-search-item--finished" : ""}`}
+              onClick={() => {
+                if (alreadyFinished) {
+                  setEditingId(isEditing ? null : rb.boatId);
+                } else if (!alreadyStaged) {
+                  onStage(rb.boatId);
+                }
+              }}
+            >
+              <div className="finish-search-item-info">
+                <span className="checkin-boat-name">{boat?.name || `#${rb.boatId}`}</span>
+                {boat?.info.sailNumber && (
+                  <span className="checkin-boat-sail">{boat.info.sailNumber}</span>
+                )}
+                <span className="checkin-boat-class">{rb.class}</span>
+              </div>
+              <span className="finish-search-item-status">
+                {alreadyFinished
+                  ? formatFinishTimeShort(rb.finishTime as number)
+                  : alreadyStaged ? "Staged" : rb.status}
+              </span>
+            </button>
+
+            {isEditing && alreadyFinished && (
+              <div className="finish-edit-row">
+                <div className="staged-time-display">
+                  <button className="staged-time-adj" onClick={() => onAdjustFinish(rb.boatId, -1000)}>−1s</button>
+                  <span className="staged-time">{formatFinishTimeShort(rb.finishTime as number)}</span>
+                  <button className="staged-time-adj" onClick={() => onAdjustFinish(rb.boatId, 1000)}>+1s</button>
+                </div>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => { onUnfinish(rb.boatId); setEditingId(null); }}
+                >
+                  Unfinish
+                </button>
+              </div>
+            )}
+          </div>
         );
       })}
     </div>
@@ -137,6 +169,7 @@ function StagedBoatRow({
   const isUnidentified = staged.boatId == null;
   const hasLastFinish = !isFinished && staged.lastFinishTime != null;
   const isMultiLap = lapInfo != null && lapInfo.totalLaps > 1;
+  const isIntermediateLap = isMultiLap && lapInfo.lapsCompleted > 0 && lapInfo.lapsCompleted < lapInfo.totalLaps && !isFinished;
 
   const handleFinish = () => {
     onFinish();
@@ -163,7 +196,7 @@ function StagedBoatRow({
     : "Finish";
 
   return (
-    <div className={`staged-row ${isFinished ? "staged-row--finished" : ""} ${flash ? "staged-row--flash" : ""}`}>
+    <div className={`staged-row ${isFinished ? "staged-row--finished" : ""} ${isIntermediateLap ? "staged-row--lapped" : ""} ${flash ? "staged-row--flash" : ""}`}>
       <div className="staged-row-main">
         {/* Reorder buttons */}
         <div className="staged-arrows">
@@ -213,14 +246,14 @@ function StagedBoatRow({
               {finishLabel}
             </button>
             <button className="staged-refinish-btn" onClick={onRefinish}>
-              {formatFinishTime(staged.lastFinishTime!)}
+              {formatFinishTimeShort(staged.lastFinishTime!)}
             </button>
           </div>
         )}
         {isFinished && (
           <div className="staged-time-display">
             <button className="staged-time-adj" onClick={() => onAdjustTime(-1000)}>−1s</button>
-            <span className="staged-time">{formatFinishTime(staged.finishTime!)}</span>
+            <span className="staged-time">{formatFinishTimeShort(staged.finishTime!)}</span>
             <button className="staged-time-adj" onClick={() => onAdjustTime(1000)}>+1s</button>
           </div>
         )}
@@ -354,9 +387,10 @@ export default function FinishTab() {
       );
       saveLapFinish(entry.boatId, finishTime, newLapsCompleted, newLapTimes, true);
     } else {
-      // Intermediate lap - flash but stay unfinished
+      // Intermediate lap - save lap data, keep boat in staging unfinished
+      // Force a re-render by updating a harmless field so the component picks up new lapInfo
       setStaged((prev) =>
-        prev.map((s) => s) // trigger re-render for flash
+        prev.map((s) => (s.id === stagedId ? { ...s, lastFinishTime: finishTime } : s))
       );
       saveLapFinish(entry.boatId, null, newLapsCompleted, newLapTimes, false);
     }
@@ -494,6 +528,15 @@ export default function FinishTab() {
         raceBoats={raceBoats}
         stagedIds={stagedBoatIds}
         onStage={stageBoat}
+        onAdjustFinish={(boatId, delta) => {
+          const rb = raceBoats.find((b) => b.boatId === boatId);
+          if (rb?.finishTime != null) {
+            saveFinishTime(boatId, (rb.finishTime as number) + delta);
+          }
+        }}
+        onUnfinish={(boatId) => {
+          saveFinishTime(boatId, null);
+        }}
       />
     </div>
   );

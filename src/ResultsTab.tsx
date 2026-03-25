@@ -282,47 +282,6 @@ function calculateSeriesResults(
 
 // ---- CSV export ----
 
-function exportRaceCSV(results: RaceResults): string {
-  const header = "Overall Rank,Class Rank,Boat,Sail #,Class,Elapsed,Corrected,Status";
-  const rows = results.boats
-    .sort((a, b) => (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity))
-    .map((r) => [
-      r.overallRank ?? "—",
-      r.classRank ?? "—",
-      r.boatName,
-      r.sailNumber,
-      r.className,
-      formatElapsed(r.elapsedMs),
-      formatElapsed(r.correctedMs),
-      statusLabel(r.status),
-    ].join(","));
-  return [header, ...rows].join("\n");
-}
-
-function exportSeriesCSV(results: SeriesBoatResult[], races: Race[]): string {
-  const raceHeaders = races.map((r) => `${r.name} Rank`).join(",");
-  const header = `Series Rank,Class Rank,Boat,Sail #,Class,Total,${raceHeaders}`;
-  const rows = results.map((r) => {
-    const raceRanks = r.raceResults.map((rr) => {
-      const rank = rr.overallRank ?? "—";
-      return rr.dropped ? `(${rank})` : String(rank);
-    }).join(",");
-    const total = r.totalPoints != null
-      ? `${r.totalPoints} pts`
-      : formatElapsed(r.totalTimeMs);
-    return [
-      r.seriesOverallRank ?? "—",
-      r.seriesClassRank ?? "—",
-      r.boatName,
-      r.sailNumber,
-      r.className,
-      total,
-      raceRanks,
-    ].join(",");
-  });
-  return [header, ...rows].join("\n");
-}
-
 function downloadCSV(content: string, filename: string) {
   const blob = new Blob([content], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -388,10 +347,12 @@ function RaceResultsView({
   results,
   raceName,
   visibleCols,
+  topN,
 }: {
   results: RaceResults;
   raceName: string;
   visibleCols: Set<RaceColId>;
+  topN: number;
 }) {
   const sorted = [...results.boats].sort(
     (a, b) => (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity)
@@ -405,7 +366,7 @@ function RaceResultsView({
         <span className="results-table-title">{raceName}</span>
         <button
           className="btn btn-secondary btn-sm"
-          onClick={() => downloadCSV(exportRaceCSV(results), `${raceName}_results.csv`)}
+          onClick={() => downloadCSV(exportRaceCSVWithSummary(results, topN), `${raceName}_results.csv`)}
         >
           Export
         </button>
@@ -462,13 +423,14 @@ function RaceResultsView({
 // ---- Series results view ----
 
 function SeriesResultsView({
-  results, races, seriesName, seriesMethod, visibleCols,
+  results, races, seriesName, seriesMethod, visibleCols, topN,
 }: {
   results: SeriesBoatResult[];
   races: Race[];
   seriesName: string;
   seriesMethod: SeriesMethod;
   visibleCols: Set<RaceColId>;
+  topN: number;
 }) {
   const show = (id: RaceColId) => visibleCols.has(id);
 
@@ -478,7 +440,7 @@ function SeriesResultsView({
         <span className="results-table-title">{seriesName} — Series</span>
         <button
           className="btn btn-secondary btn-sm"
-          onClick={() => downloadCSV(exportSeriesCSV(results, races), `${seriesName}_series.csv`)}
+          onClick={() => downloadCSV(exportSeriesCSVWithSummary(results, races, seriesMethod, topN), `${seriesName}_series.csv`)}
         >
           Export
         </button>
@@ -559,6 +521,221 @@ function PhrfWarning({ raceBoats, boats }: { raceBoats: RaceBoatEntry[]; boats: 
   );
 }
 
+// ---- Summary views ----
+
+function RaceSummary({ results, topN }: { results: RaceResults; topN: number }) {
+  const sorted = [...results.boats].sort(
+    (a, b) => (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity)
+  );
+  const topOverall = sorted.filter((r) => r.overallRank != null && r.overallRank <= topN);
+
+  const classes = Array.from(new Set(results.boats.map((r) => r.className)));
+  const topByClass = classes.map((cls) => {
+    const classBoats = results.boats
+      .filter((r) => r.className === cls && r.classRank != null && r.classRank <= topN)
+      .sort((a, b) => a.classRank! - b.classRank!);
+    return { className: cls, boats: classBoats };
+  });
+
+  return (
+    <div className="results-summary">
+      <div className="results-summary-section">
+        <div className="results-summary-heading">Top {topN} Overall</div>
+        {topOverall.length === 0 && <p className="races-empty">No finishers yet</p>}
+        {topOverall.map((r) => (
+          <div key={r.boatId} className="results-summary-row">
+            <span className="results-summary-rank">{r.overallRank}</span>
+            <span className="results-summary-name">{r.boatName}</span>
+            <span className="results-summary-detail">{r.className}</span>
+            <span className="results-summary-time">{formatElapsed(r.correctedMs)}</span>
+          </div>
+        ))}
+      </div>
+
+      {topByClass.map(({ className, boats }) => (
+        <div key={className} className="results-summary-section">
+          <div className="results-summary-heading">Top {topN} — {className}</div>
+          {boats.length === 0 && <p className="races-empty">No finishers yet</p>}
+          {boats.map((r) => (
+            <div key={r.boatId} className="results-summary-row">
+              <span className="results-summary-rank">{r.classRank}</span>
+              <span className="results-summary-name">{r.boatName}</span>
+              <span className="results-summary-time">{formatElapsed(r.correctedMs)}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SeriesSummary({
+  results,
+  topN,
+  seriesMethod,
+}: {
+  results: SeriesBoatResult[];
+  topN: number;
+  seriesMethod: SeriesMethod;
+}) {
+  const topOverall = results.filter((r) => r.seriesOverallRank != null && r.seriesOverallRank <= topN);
+
+  const classes = Array.from(new Set(results.map((r) => r.className)));
+  const topByClass = classes.map((cls) => {
+    const classBoats = results
+      .filter((r) => r.className === cls && r.seriesClassRank != null && r.seriesClassRank <= topN)
+      .sort((a, b) => a.seriesClassRank! - b.seriesClassRank!);
+    return { className: cls, boats: classBoats };
+  });
+
+  const formatTotal = (r: SeriesBoatResult) => {
+    if (seriesMethod === "points") return r.totalPoints != null ? `${r.totalPoints} pts` : "—";
+    return formatElapsed(r.totalTimeMs);
+  };
+
+  return (
+    <div className="results-summary">
+      <div className="results-summary-section">
+        <div className="results-summary-heading">Top {topN} Overall</div>
+        {topOverall.length === 0 && <p className="races-empty">No results yet</p>}
+        {topOverall.map((r) => (
+          <div key={r.boatId} className="results-summary-row">
+            <span className="results-summary-rank">{r.seriesOverallRank}</span>
+            <span className="results-summary-name">{r.boatName}</span>
+            <span className="results-summary-detail">{r.className}</span>
+            <span className="results-summary-time">{formatTotal(r)}</span>
+          </div>
+        ))}
+      </div>
+
+      {topByClass.map(({ className, boats }) => (
+        <div key={className} className="results-summary-section">
+          <div className="results-summary-heading">Top {topN} — {className}</div>
+          {boats.length === 0 && <p className="races-empty">No results yet</p>}
+          {boats.map((r) => (
+            <div key={r.boatId} className="results-summary-row">
+              <span className="results-summary-rank">{r.seriesClassRank}</span>
+              <span className="results-summary-name">{r.boatName}</span>
+              <span className="results-summary-time">{formatTotal(r)}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---- CSV with summary ----
+
+function buildSummaryCSV(
+  results: BoatResult[],
+  topN: number,
+  label: string,
+  rankField: "overallRank" | "classRank"
+): string[] {
+  const lines: string[] = [];
+  const top = results
+    .filter((r) => r[rankField] != null && r[rankField]! <= topN)
+    .sort((a, b) => a[rankField]! - b[rankField]!);
+  lines.push(`\n${label}`);
+  lines.push("Rank,Boat,Class,Corrected Time");
+  top.forEach((r) => {
+    lines.push(`${r[rankField]},${r.boatName},${r.className},${formatElapsed(r.correctedMs)}`);
+  });
+  return lines;
+}
+
+function exportRaceCSVWithSummary(results: RaceResults, topN: number): string {
+  // Summary
+  const lines: string[] = [`${results.raceName} — Summary`];
+  const sorted = [...results.boats].sort((a, b) => (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity));
+
+  lines.push(...buildSummaryCSV(sorted, topN, `Top ${topN} Overall`, "overallRank"));
+
+  const classes = Array.from(new Set(results.boats.map((r) => r.className)));
+  classes.forEach((cls) => {
+    const classBoats = results.boats.filter((r) => r.className === cls);
+    lines.push(...buildSummaryCSV(classBoats, topN, `Top ${topN} — ${cls}`, "classRank"));
+  });
+
+  // Full results
+  lines.push("");
+  lines.push("Full Results");
+  lines.push("Overall Rank,Class Rank,Boat,Sail #,Class,Elapsed,Corrected,Status");
+  sorted.forEach((r) => {
+    lines.push([
+      r.overallRank ?? "—",
+      r.classRank ?? "—",
+      r.boatName,
+      r.sailNumber,
+      r.className,
+      formatElapsed(r.elapsedMs),
+      formatElapsed(r.correctedMs),
+      statusLabel(r.status),
+    ].join(","));
+  });
+
+  return lines.join("\n");
+}
+
+function exportSeriesCSVWithSummary(
+  results: SeriesBoatResult[],
+  races: Race[],
+  seriesMethod: SeriesMethod,
+  topN: number
+): string {
+  const lines: string[] = ["Series Summary"];
+
+  const formatTotal = (r: SeriesBoatResult) => {
+    if (seriesMethod === "points") return r.totalPoints != null ? `${r.totalPoints} pts` : "—";
+    return formatElapsed(r.totalTimeMs);
+  };
+
+  // Top N overall
+  const topOverall = results.filter((r) => r.seriesOverallRank != null && r.seriesOverallRank <= topN);
+  lines.push(`\nTop ${topN} Overall`);
+  lines.push("Rank,Boat,Class,Total");
+  topOverall.forEach((r) => {
+    lines.push(`${r.seriesOverallRank},${r.boatName},${r.className},${formatTotal(r)}`);
+  });
+
+  // Top N per class
+  const classes = Array.from(new Set(results.map((r) => r.className)));
+  classes.forEach((cls) => {
+    const classBoats = results
+      .filter((r) => r.className === cls && r.seriesClassRank != null && r.seriesClassRank <= topN)
+      .sort((a, b) => a.seriesClassRank! - b.seriesClassRank!);
+    lines.push(`\nTop ${topN} — ${cls}`);
+    lines.push("Rank,Boat,Total");
+    classBoats.forEach((r) => {
+      lines.push(`${r.seriesClassRank},${r.boatName},${formatTotal(r)}`);
+    });
+  });
+
+  // Full results
+  lines.push("");
+  lines.push("Full Results");
+  const raceHeaders = races.map((r) => `${r.name} Rank`).join(",");
+  lines.push(`Series Rank,Class Rank,Boat,Sail #,Class,Total,${raceHeaders}`);
+  results.forEach((r) => {
+    const raceRanks = r.raceResults.map((rr) => {
+      const rank = rr.overallRank ?? "—";
+      return rr.dropped ? `(${rank})` : String(rank);
+    }).join(",");
+    lines.push([
+      r.seriesOverallRank ?? "—",
+      r.seriesClassRank ?? "—",
+      r.boatName,
+      r.sailNumber,
+      r.className,
+      formatTotal(r),
+      raceRanks,
+    ].join(","));
+  });
+
+  return lines.join("\n");
+}
+
 // ---- Main ResultsTab ----
 
 export default function ResultsTab() {
@@ -570,6 +747,8 @@ export default function ResultsTab() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [classFactors, setClassFactors] = useState<ClassFactor[]>([]);
   const [visibleCols, setVisibleCols] = useState<Set<RaceColId>>(defaultVisibleCols);
+  const [topN, setTopN] = useState(3);
+  const [summaryOpen, setSummaryOpen] = useState(true);
 
   const toggleCol = (id: string) => {
     setVisibleCols((prev) => {
@@ -750,7 +929,48 @@ export default function ResultsTab() {
                 </div>
               </div>
             )}
+
+            <div className="results-config-section">
+              <div className="start-classes-label">Show top:</div>
+              <div className="results-drops">
+                <button
+                  className="staged-time-adj"
+                  onClick={() => setTopN(Math.max(1, topN - 1))}
+                >
+                  −
+                </button>
+                <span className="results-drops-value">{topN}</span>
+                <button
+                  className="staged-time-adj"
+                  onClick={() => setTopN(topN + 1)}
+                >
+                  +
+                </button>
+              </div>
+            </div>
           </div>
+        )}
+      </div>
+
+      {/* Summary */}
+      <div className="results-summary-wrap">
+        <button className="results-summary-toggle" onClick={() => setSummaryOpen(!summaryOpen)}>
+          <span className="results-summary-toggle-title">Top {topN} Summary</span>
+          <span className={`race-card-chevron ${summaryOpen ? "race-card-chevron--open" : ""}`}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 6 15 12 9 18" />
+            </svg>
+          </span>
+        </button>
+        {summaryOpen && (
+          <>
+            {viewMode === "race" && (
+              <RaceSummary results={raceResults} topN={topN} />
+            )}
+            {viewMode === "series" && seriesResults && (
+              <SeriesSummary results={seriesResults} topN={topN} seriesMethod={seriesMethod} />
+            )}
+          </>
         )}
       </div>
 
@@ -763,7 +983,7 @@ export default function ResultsTab() {
 
       {/* Results display */}
       {viewMode === "race" && (
-        <RaceResultsView results={raceResults} raceName={selectedRace.name} visibleCols={visibleCols} />
+        <RaceResultsView results={raceResults} raceName={selectedRace.name} visibleCols={visibleCols} topN={topN} />
       )}
 
       {viewMode === "series" && seriesResults && parentSeries && (
@@ -773,6 +993,7 @@ export default function ResultsTab() {
           seriesName={parentSeries.name}
           seriesMethod={seriesMethod}
           visibleCols={visibleCols}
+          topN={topN}
         />
       )}
     </div>
