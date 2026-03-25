@@ -18,7 +18,15 @@ function MainApp() {
 
   return (
     <TimeProvider>
-      <div className="app-shell">
+      <div className="desktop-wrapper">
+        <div className="desktop-sidebar">
+          <div className="desktop-brand">
+            <span className="desktop-brand-race">race</span>
+            <span className="desktop-brand-mate">mate</span>
+          </div>
+          <p className="desktop-tagline">Sailboat race management</p>
+        </div>
+        <div className="app-shell">
         <TopBar
           raceName={selectedRace ? selectedRace.name : null}
           synced={synced}
@@ -44,6 +52,7 @@ function MainApp() {
 
         <TabBar active={activeTab} onChange={setActiveTab} />
       </div>
+      </div>
     </TimeProvider>
   );
 }
@@ -52,7 +61,20 @@ function AppContent() {
   const { user, loading } = useAuth();
 
   if (loading) return null;
-  if (!user) return <LoginPage />;
+  if (!user) return (
+    <div className="desktop-wrapper">
+      <div className="desktop-sidebar">
+        <div className="desktop-brand">
+          <span className="desktop-brand-race">race</span>
+          <span className="desktop-brand-mate">mate</span>
+        </div>
+        <p className="desktop-tagline">Sailboat race management</p>
+      </div>
+      <div className="app-shell">
+        <LoginPage />
+      </div>
+    </div>
+  );
 
   return (
     <RaceProvider>

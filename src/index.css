@@ -195,6 +195,72 @@ body {
   background: var(--input-border);
 }
 
+/* ---- Desktop wrapper ---- */
+
+.desktop-wrapper {
+  height: 100%;
+}
+
+.desktop-sidebar {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .desktop-wrapper {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 3rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+    height: 100%;
+    box-sizing: border-box;
+  }
+
+  .desktop-sidebar {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    flex-shrink: 0;
+    width: 260px;
+  }
+
+  .desktop-brand {
+    font-family: var(--font-display);
+    font-size: 3rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+
+  .desktop-brand-race {
+    color: var(--white);
+  }
+
+  .desktop-brand-mate {
+    color: var(--orange);
+  }
+
+  .desktop-tagline {
+    margin-top: 0.5rem;
+    font-size: 1rem;
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  .app-shell {
+    width: 420px;
+    max-width: 420px;
+    flex-shrink: 0;
+    border-radius: 16px;
+    border: 1px solid var(--input-border);
+    overflow: hidden;
+    box-shadow: 0 8px 40px rgba(0 0 0 / 0.4);
+  }
+}
+
 /* ---- App shell ---- */
 
 .app-shell {
