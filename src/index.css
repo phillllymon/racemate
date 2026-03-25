@@ -254,6 +254,19 @@ body {
   letter-spacing: 0.04em;
 }
 
+.topbar-time-sync {
+  font-size: 0.75rem;
+  opacity: 0.5;
+}
+
+.topbar-time-sync--ok {
+  opacity: 0.8;
+}
+
+.topbar-time-sync--pending {
+  animation: pulse 1s ease infinite alternate;
+}
+
 .topbar-center {
   flex: 1;
   text-align: center;

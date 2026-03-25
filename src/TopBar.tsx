@@ -8,13 +8,19 @@ interface TopBarProps {
 }
 
 export default function TopBar({ raceName, synced }: TopBarProps) {
-  const { formatted } = useTime();
+  const { formatted, synced: timeSynced, offset } = useTime();
 
   return (
     <div className="topbar">
       <div className="topbar-left">
         <TopBarMenu />
         <span className="topbar-clock">{formatted}</span>
+        <span
+          className={`topbar-time-sync ${timeSynced ? "topbar-time-sync--ok" : "topbar-time-sync--pending"}`}
+          title={timeSynced ? `Time synced (${offset > 0 ? "+" : ""}${offset}ms)` : "Time sync pending..."}
+        >
+          {timeSynced ? "⏱" : "⏳"}
+        </span>
       </div>
 
       <div className="topbar-center">
