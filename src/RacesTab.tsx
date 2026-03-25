@@ -16,7 +16,7 @@ function EditBoatForm({
   raceEntry: RaceBoatEntry;
   onDone: () => void;
 }) {
-  const { updateRaceData, races } = useRaces();
+  const { updateRaceData, updateBoatData, races } = useRaces();
   const race = races.find((r) => r.id === raceId)!;
 
   const [name, setName] = useState(boat.info.name || boat.name);
@@ -39,8 +39,23 @@ function EditBoatForm({
     });
     updateRaceData(raceId, race.name, { ...race.info, boats: updatedBoats });
 
-    // TODO: also update the boat record in the database via updateBoat
-    // For now we just update the race entry class
+    // Update the boat record in the database
+    const updatedInfo: BoatInfo = {
+      ...boat.info,
+      name: name.trim() || boat.name,
+    };
+    if (sailNumber.trim()) updatedInfo.sailNumber = sailNumber.trim();
+    else delete updatedInfo.sailNumber;
+    if (boatType.trim()) updatedInfo.type = boatType.trim();
+    else delete updatedInfo.type;
+    if (skipper.trim()) updatedInfo.skipper = skipper.trim();
+    else delete updatedInfo.skipper;
+    if (boatClass.trim()) updatedInfo.class = boatClass.trim();
+    else delete updatedInfo.class;
+    if (phrf.trim() && !isNaN(Number(phrf))) updatedInfo.phrf = Number(phrf);
+    else delete updatedInfo.phrf;
+
+    updateBoatData(boat.id, name.trim() || boat.name, updatedInfo);
     onDone();
   };
 
@@ -304,6 +319,7 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   const [editingRace, setEditingRace] = useState(false);
   const [editName, setEditName] = useState(race.name);
   const [editAutoCheckIn, setEditAutoCheckIn] = useState(race.info.autoCheckIn ?? true);
+  const [editClassLaps, setEditClassLaps] = useState<Record<string, number>>({});
   const isSelected = selectedRaceId === race.id;
   const raceBoats = race.info.boats || [];
 
@@ -333,6 +349,7 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
       ...race.info,
       name: editName.trim() || race.name,
       autoCheckIn: editAutoCheckIn,
+      classLaps: editClassLaps,
     });
     setEditingRace(false);
   };
@@ -340,6 +357,12 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   const startEditingRace = () => {
     setEditName(race.name);
     setEditAutoCheckIn(race.info.autoCheckIn ?? true);
+    const existing = (race.info.classLaps || {}) as Record<string, number>;
+    const laps: Record<string, number> = {};
+    Array.from(byClass.keys()).forEach((cls) => {
+      laps[cls] = existing[cls] || 1;
+    });
+    setEditClassLaps(laps);
     setEditingRace(true);
   };
 
@@ -398,6 +421,31 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
                 />
                 <span>Auto check-in boats</span>
               </label>
+              {Object.keys(editClassLaps).length > 0 && (
+                <div className="edit-laps-section">
+                  <div className="start-classes-label">Laps per class:</div>
+                  {Object.entries(editClassLaps).map(([cls, laps]) => (
+                    <div key={cls} className="results-factor-row">
+                      <span className="results-factor-class">{cls}</span>
+                      <div className="results-factor-controls">
+                        <button
+                          className="staged-time-adj"
+                          onClick={() => setEditClassLaps((prev) => ({ ...prev, [cls]: Math.max(1, laps - 1) }))}
+                        >
+                          −
+                        </button>
+                        <span className="results-factor-value">{laps}</span>
+                        <button
+                          className="staged-time-adj"
+                          onClick={() => setEditClassLaps((prev) => ({ ...prev, [cls]: laps + 1 }))}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="races-form-actions">
                 <button className="btn btn-primary" onClick={saveRaceEdit}>Save</button>
                 <button className="btn btn-secondary" onClick={() => setEditingRace(false)}>Cancel</button>

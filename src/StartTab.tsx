@@ -292,22 +292,31 @@ function SequenceEditor({
   onChange: (seq: SequenceStep[]) => void;
 }) {
   const [label, setLabel] = useState("");
-  const [minutes, setMinutes] = useState("");
-  const [seconds, setSeconds] = useState("");
+  const [seqMinutes, setSeqMinutes] = useState(0);
+  const [seqSeconds, setSeqSeconds] = useState(0);
 
   const add = () => {
     if (!label.trim()) return;
-    const offset = (Number(minutes) || 0) * 60 + (Number(seconds) || 0);
+    const offset = seqMinutes * 60 + seqSeconds;
     onChange([...sequence, { offsetSeconds: offset, label: label.trim() }]
       .sort((a, b) => b.offsetSeconds - a.offsetSeconds));
     setLabel("");
-    setMinutes("");
-    setSeconds("");
+    setSeqMinutes(0);
+    setSeqSeconds(0);
   };
 
   const remove = (idx: number) => {
     onChange(sequence.filter((_, i) => i !== idx));
   };
+
+  const arrow = (dir: "up" | "down") => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      {dir === "up"
+        ? <polyline points="6 15 12 9 18 15" />
+        : <polyline points="6 9 12 15 18 9" />
+      }
+    </svg>
+  );
 
   return (
     <div className="sequence-editor">
@@ -332,13 +341,27 @@ function SequenceEditor({
       <div className="sequence-add">
         <input className="login-input" placeholder="Action (e.g. Raise red flag)" value={label} onChange={(e) => setLabel(e.target.value)} />
         <div className="sequence-add-time">
-          <input className="login-input start-time-input" placeholder="Min" type="number" value={minutes} onChange={(e) => setMinutes(e.target.value)} inputMode="numeric" />
-          <span className="start-time-label">m</span>
-          <input className="login-input start-time-input" placeholder="Sec" type="number" value={seconds} onChange={(e) => setSeconds(e.target.value)} inputMode="numeric" />
-          <span className="start-time-label">s</span>
+          <span className="start-time-label">Time before start:</span>
         </div>
-        <button className="btn btn-secondary" onClick={add} disabled={!label.trim()}>+ Add Step</button>
+        <div className="sequence-spinner-row">
+          <div className="time-picker-col">
+            <button className="time-picker-btn time-picker-btn--sm" onClick={() => setSeqMinutes((v) => Math.min(v + 1, 99))}>{arrow("up")}</button>
+            <span className="time-picker-digit time-picker-digit--sm">{String(seqMinutes).padStart(2, "0")}</span>
+            <button className="time-picker-btn time-picker-btn--sm" onClick={() => setSeqMinutes((v) => Math.max(v - 1, 0))}>{arrow("down")}</button>
+          </div>
+          <span className="time-picker-colon time-picker-colon--sm">m</span>
+          <div className="time-picker-col">
+            <button className="time-picker-btn time-picker-btn--sm" onClick={() => setSeqSeconds((v) => (v + 1) % 60)}>{arrow("up")}</button>
+            <span className="time-picker-digit time-picker-digit--sm">{String(seqSeconds).padStart(2, "0")}</span>
+            <button className="time-picker-btn time-picker-btn--sm" onClick={() => setSeqSeconds((v) => (v + 59) % 60)}>{arrow("down")}</button>
+          </div>
+          <span className="time-picker-colon time-picker-colon--sm">s</span>
+        </div>
+        <button className="btn btn-primary" onClick={add} disabled={!label.trim()}>Save Step</button>
       </div>
+      {sequence.length === 0 && (
+        <p className="races-empty">No steps yet — add actions above</p>
+      )}
     </div>
   );
 }
@@ -601,12 +624,14 @@ function StartCard({
   const [boatSearch, setBoatSearch] = useState("");
   const [dismissedNotifications, setDismissedNotifications] = useState<Set<number>>(new Set());
   const [editingStart, setEditingStart] = useState(false);
+  const [editName, setEditName] = useState<string>("");
   const [editClasses, setEditClasses] = useState<string[]>(start.classes);
   const [editHours, setEditHours] = useState(0);
   const [editMinutes, setEditMinutes] = useState(0);
   const [editSeconds, setEditSeconds] = useState(0);
 
   const startEditing = () => {
+    setEditName((start.name as string) || "");
     setEditClasses(start.classes);
     if (start.startTime) {
       const d = new Date(start.startTime);
@@ -626,10 +651,27 @@ function StartCard({
     const d = new Date();
     d.setHours(editHours, editMinutes, editSeconds, 0);
     if (d.getTime() < now) d.setDate(d.getDate() + 1);
+    const newTime = d.getTime();
+
+    // If moving start time to the future and start had already occurred,
+    // reset boats in this start back to checked-in so OCS flow triggers again
+    const classes = editClasses.length > 0 ? editClasses : start.classes;
+    if (newTime > now && start.startTime != null && start.startTime <= now) {
+      const boatsInThisStart = raceBoats.filter((rb) => classes.includes(rb.class));
+      boatsInThisStart.forEach((rb) => {
+        if (rb.status === "racing" || rb.status === "over-early" || rb.status === "OCS") {
+          onUpdateBoatStatus(rb.boatId, "checked-in");
+        }
+      });
+      // Clear dismissed notifications so they fire again
+      setDismissedNotifications(new Set());
+    }
+
     onUpdateStart({
       ...start,
-      classes: editClasses.length > 0 ? editClasses : start.classes,
-      startTime: d.getTime(),
+      name: editName.trim() || undefined,
+      classes,
+      startTime: newTime,
     });
     setEditingStart(false);
   };
@@ -686,7 +728,7 @@ function StartCard({
       <div className="start-card-header">
         <button className="race-card-header-toggle" onClick={() => setExpanded(!expanded)}>
           <div className="start-card-header-left">
-            <span className="start-card-label">Start {startIndex + 1}</span>
+            <span className="start-card-label">{(start.name as string) || `Start ${startIndex + 1}`}</span>
             <span className="start-card-classes">{start.classes.join(", ")}</span>
           </div>
           <div className="start-card-header-right">
@@ -721,7 +763,12 @@ function StartCard({
           {/* Edit start (classes + time) */}
           {editingStart && (
             <div className="races-form">
-              <div className="edit-boat-title">Edit Start</div>
+              <input
+                className="login-input"
+                placeholder={`Start ${startIndex + 1}`}
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+              />
               <div className="start-classes-label">Classes:</div>
               <div className="edit-class-picks">
                 {allClasses.map((cls) => (

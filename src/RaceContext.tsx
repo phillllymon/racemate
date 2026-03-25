@@ -4,7 +4,7 @@ import { useAuth } from "./AuthContext";
 import {
   addRace, updateRace, getRacesByColumn,
   addSeries, updateSeries, getSeriesByColumn,
-  addBoat, getBoatsByColumn,
+  addBoat, updateBoat, getBoatsByColumn,
 } from "./api";
 import type {
   RaceRecord, SeriesRecord, BoatRecord,
@@ -58,6 +58,7 @@ interface RaceContextValue {
   createSeries: (name: string, info?: Partial<SeriesInfo>) => Promise<Series>;
   createRace: (name: string, seriesId: number | null, info?: Partial<RaceInfo>) => Promise<Race>;
   createBoat: (name: string, info: BoatInfo) => Promise<Boat>;
+  updateBoatData: (boatId: number, name: string, info: BoatInfo) => void;
   updateRaceData: (raceId: number, name: string, info: RaceInfo) => void;
   updateSeriesData: (seriesId: number, name: string, info: SeriesInfo) => void;
   refreshAll: () => Promise<void>;
@@ -207,6 +208,15 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     return created;
   };
 
+  const updateBoatData = (boatId: number, name: string, info: BoatInfo) => {
+    setBoats((prev) =>
+      prev.map((b) => (b.id === boatId ? { ...b, name, info } : b))
+    );
+    if (auth) {
+      queueUpdate(`boat-${boatId}`, () => updateBoat(auth, boatId, name, info));
+    }
+  };
+
   const updateRaceData = (raceId: number, name: string, info: RaceInfo) => {
     setRaces((prev) =>
       prev.map((r) => (r.id === raceId ? { ...r, name, info } : r))
@@ -233,7 +243,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         synced, loading,
         selectRace: setSelectedRaceId,
         createSeries, createRace, createBoat,
-        updateRaceData, updateSeriesData,
+        updateBoatData, updateRaceData, updateSeriesData,
         refreshAll,
       }}
     >

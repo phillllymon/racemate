@@ -8,6 +8,8 @@ import TabBar from "./TabBar";
 import RacesTab from "./RacesTab";
 import StartTab from "./StartTab";
 import ChartTab from "./ChartTab";
+import FinishTab from "./FinishTab";
+import ResultsTab from "./ResultsTab";
 import type { TabId } from "./TabBar";
 
 function MainApp() {
@@ -26,12 +28,8 @@ function MainApp() {
           {activeTab === "races" && <RacesTab />}
           {activeTab === "start" && <StartTab />}
           {activeTab === "chart" && <ChartTab />}
-          {activeTab === "finish" && (
-            <div className="tab-placeholder"><p>Finish</p></div>
-          )}
-          {activeTab === "results" && (
-            <div className="tab-placeholder"><p>Results</p></div>
-          )}
+          {activeTab === "finish" && <FinishTab />}
+          {activeTab === "results" && <ResultsTab />}
         </div>
 
         <TabBar active={activeTab} onChange={setActiveTab} />

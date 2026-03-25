@@ -1139,6 +1139,28 @@ body {
   gap: 0.5rem;
 }
 
+.sequence-spinner-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.time-picker-btn--sm {
+  width: 44px;
+  height: 38px;
+}
+
+.time-picker-digit--sm {
+  font-size: 1.8rem;
+  min-width: 44px;
+}
+
+.time-picker-colon--sm {
+  font-size: 1.4rem;
+  padding: 0 0.1rem;
+}
+
 /* Sequence notifications */
 
 .seq-notification-stack {
@@ -1517,4 +1539,637 @@ body {
   font-size: 0.85rem;
   color: var(--text-muted);
   text-align: center;
+}
+
+/* ---- Finish tab ---- */
+
+.finish-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+}
+
+.finish-search-input {
+  flex-shrink: 0;
+}
+
+/* Search results */
+
+.finish-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.finish-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--font-body);
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.finish-search-item:active:not(:disabled) {
+  background: rgba(255 255 255 / 0.08);
+}
+
+.finish-search-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.finish-search-item--staged {
+  border-color: var(--sky);
+}
+
+.finish-search-item--finished {
+  border-color: #4ade80;
+}
+
+.finish-search-item-info {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.finish-search-item-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* MARK button */
+
+.finish-mark-btn {
+  height: 60px;
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--white);
+  background: var(--red);
+}
+
+.finish-mark-btn:active {
+  opacity: 0.85;
+}
+
+/* Staging area */
+
+.finish-staging {
+  background: var(--navy-mid);
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.finish-staging-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+
+.finish-staging-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--white);
+}
+
+.finish-staging-list {
+  padding: 0 0.5rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Staged boat row */
+
+.staged-row {
+  border-bottom: 1px solid rgba(255 255 255 / 0.04);
+}
+
+.staged-row:last-child {
+  border-bottom: none;
+}
+
+.staged-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 64px;
+  padding: 0 0.25rem;
+}
+
+.staged-row--finished .staged-row-main {
+  background: rgba(74 222 128 / 0.08);
+  border-radius: 6px;
+}
+
+.staged-row--flash .staged-row-main {
+  animation: finishFlash 0.6s ease;
+}
+
+@keyframes finishFlash {
+  0% { background: rgba(74 222 128 / 0.4); }
+  100% { background: rgba(74 222 128 / 0.08); }
+}
+
+/* Arrows */
+
+.staged-arrows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+
+.staged-arrow-btn {
+  width: 32px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--white);
+  cursor: pointer;
+}
+
+.staged-arrow-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.staged-arrow-btn:active:not(:disabled) {
+  background: var(--input-border);
+}
+
+/* Boat info in staged row */
+
+.staged-boat-info {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.staged-mark-label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--orange);
+}
+
+/* Finish button */
+
+.staged-finish-btn {
+  height: 44px;
+  padding: 0 1.2rem;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--white);
+  background: #4ade80;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.staged-finish-btn:active {
+  opacity: 0.85;
+}
+
+/* Refinish */
+
+.staged-refinish {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.staged-refinish-btn {
+  height: 44px;
+  padding: 0 0.6rem;
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--orange);
+  background: var(--input-bg);
+  border: 1.5px solid var(--orange);
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.staged-refinish-btn:active {
+  opacity: 0.85;
+}
+
+/* Time display with adjustments */
+
+.staged-time-display {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.staged-time {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #4ade80;
+  min-width: 65px;
+  text-align: center;
+}
+
+.staged-time-adj {
+  width: 36px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-light);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.staged-time-adj:active {
+  background: var(--input-border);
+}
+
+/* Action buttons */
+
+.staged-actions {
+  display: flex;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+.staged-action-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.staged-action-btn:active {
+  background: rgba(255 255 255 / 0.08);
+}
+
+.staged-action-dismiss {
+  font-size: 1rem;
+}
+
+.staged-action-dismiss:active {
+  color: var(--red);
+}
+
+/* Assign boat to MARK */
+
+.staged-assign {
+  padding: 0.5rem 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* ---- Results tab ---- */
+
+.results-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 1rem;
+}
+
+.results-config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.results-drops {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.results-drops-value {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--white);
+  min-width: 30px;
+  text-align: center;
+}
+
+.results-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(232 104 48 / 0.1);
+  border: 1px solid var(--orange);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--orange);
+}
+
+.results-warning-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+/* Results table - split layout */
+
+.results-table-wrap {
+  background: var(--navy-mid);
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.results-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--input-border);
+}
+
+.results-table-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--white);
+}
+
+.results-split {
+  display: flex;
+  overflow: hidden;
+}
+
+.results-fixed {
+  flex-shrink: 0;
+  border-right: 1px solid var(--input-border);
+}
+
+.results-scroll {
+  flex: 1;
+  overflow-x: auto;
+}
+
+.results-row {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 0.5rem;
+  border-bottom: 1px solid rgba(255 255 255 / 0.04);
+}
+
+.results-row:last-child {
+  border-bottom: none;
+}
+
+.results-row--header {
+  background: rgba(255 255 255 / 0.03);
+  min-height: 36px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.results-row--first {
+  background: rgba(74 222 128 / 0.06);
+}
+
+.results-cell {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  padding: 0.25rem 0.25rem;
+}
+
+.results-cell--rank {
+  width: 32px;
+  flex-shrink: 0;
+  font-weight: 700;
+  color: var(--white);
+  text-align: center;
+}
+
+.results-cell--cls-rank {
+  width: 32px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.results-cell--name {
+  flex: 1;
+  min-width: 70px;
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  color: var(--white);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.results-cell--data {
+  min-width: 75px;
+  flex-shrink: 0;
+  text-align: right;
+  padding: 0.25rem 0.5rem;
+  white-space: nowrap;
+}
+
+.results-cell--mono {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.results-cell--dropped {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+/* Column toggle chips */
+
+.results-col-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.results-col-toggle {
+  height: 34px;
+  padding: 0 0.65rem;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--navy-mid);
+  border: 1.5px solid var(--input-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.results-col-toggle--on {
+  border-color: var(--sky);
+  color: var(--sky);
+}
+
+.results-col-toggle:active {
+  opacity: 0.8;
+}
+
+.results-status-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--red);
+  background: rgba(255 100 100 / 0.1);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+}
+
+/* ---- Lap badge ---- */
+
+.staged-lap-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--sky);
+  background: rgba(74 144 196 / 0.15);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+/* ---- Results settings collapsible ---- */
+
+.results-settings {
+  background: var(--navy-mid);
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.results-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+
+.results-settings-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--white);
+}
+
+.results-settings-body {
+  padding: 0 0.75rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* ---- Factor controls ---- */
+
+.results-factors {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.results-factor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0;
+}
+
+.results-factor-class {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--white);
+}
+
+.results-factor-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.results-factor-value {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--white);
+  min-width: 40px;
+  text-align: center;
+}
+
+/* ---- Status badge inline ---- */
+
+.results-status-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--red);
+  background: rgba(255 100 100 / 0.1);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+}
+
+/* ---- Laps section in race edit ---- */
+
+.edit-laps-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
