@@ -327,7 +327,7 @@ export default function FinishTab() {
   if (!selectedRace) {
     return (
       <div className="tab-placeholder">
-        <p>Select a race in the Races tab</p>
+        <p>Select a race in the Series tab</p>
       </div>
     );
   }

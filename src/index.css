@@ -205,8 +205,23 @@ body {
 
 .app-body {
   flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.app-tab-pane {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow-y: auto;
   padding: 1rem 1rem 0;
+  visibility: hidden;
+}
+
+.app-tab-pane--active {
+  visibility: visible;
 }
 
 /* ---- Top bar ---- */
@@ -1948,6 +1963,128 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+
+.results-method-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.results-method-option {
+  width: 100%;
+  height: 44px;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--input-bg);
+  border: 1.5px solid var(--input-border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  padding: 0 0.75rem;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.results-method-option--active {
+  border-color: var(--orange);
+  color: var(--white);
+}
+
+.results-method-option:active {
+  opacity: 0.85;
+}
+
+/* Wind conditions per race */
+
+.results-wind-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+  padding: 0.25rem 0;
+}
+
+.results-wind-race-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.results-wind-race-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--white);
+  min-width: 70px;
+  flex-shrink: 0;
+}
+
+.start-mode-toggle--3 {
+  /* already works with 3 buttons, just ensure equal sizing */
+}
+
+.start-mode-toggle--sm {
+  flex: 1;
+}
+
+.start-mode-toggle--sm .start-mode-btn {
+  height: 36px;
+  font-size: 0.8rem;
+}
+
+/* Time-on-Distance course inputs */
+
+.results-course-input {
+  width: 70px !important;
+  flex-shrink: 0;
+  text-align: right;
+  padding: 0.4rem 0.5rem !important;
+  font-size: 0.9rem !important;
+}
+
+.results-course-total {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.results-course-unit {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.results-fleet-avg-info {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  padding: 0.5rem 0.75rem;
+  background: rgba(74 144 196 / 0.1);
+  border-radius: 6px;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.results-tod-race-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-top: 0.35rem;
+}
+
+.results-tod-race-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--sky);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .results-drops {

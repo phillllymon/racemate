@@ -25,6 +25,8 @@ function EditBoatForm({
   const [boatType, setBoatType] = useState(boat.info.type || "");
   const [skipper, setSkipper] = useState(boat.info.skipper || "");
   const [phrf, setPhrf] = useState(boat.info.phrf != null ? String(boat.info.phrf) : "");
+  const [pn, setPn] = useState(boat.info.portsmouthNumber != null ? String(boat.info.portsmouthNumber) : "");
+  const [ircTcc, setIrcTcc] = useState(boat.info.ircTcc != null ? String(boat.info.ircTcc) : "");
   const [boatClass, setBoatClass] = useState(raceEntry.class || "");
 
   const existingClasses = Array.from(
@@ -52,6 +54,10 @@ function EditBoatForm({
     else delete updatedInfo.skipper;
     if (phrf.trim() && !isNaN(Number(phrf))) updatedInfo.phrf = Number(phrf);
     else delete updatedInfo.phrf;
+    if (pn.trim() && !isNaN(Number(pn))) updatedInfo.portsmouthNumber = Number(pn);
+    else delete updatedInfo.portsmouthNumber;
+    if (ircTcc.trim() && !isNaN(Number(ircTcc))) updatedInfo.ircTcc = Number(ircTcc);
+    else delete updatedInfo.ircTcc;
     // Don't store class on the boat record itself
     delete updatedInfo.class;
 
@@ -67,6 +73,8 @@ function EditBoatForm({
       <input className="login-input" placeholder="Skipper" value={skipper} onChange={(e) => setSkipper(e.target.value)} />
       <input className="login-input" placeholder="Boat type" value={boatType} onChange={(e) => setBoatType(e.target.value)} />
       <input className="login-input" placeholder="PHRF rating" value={phrf} onChange={(e) => setPhrf(e.target.value)} inputMode="numeric" />
+      <input className="login-input" placeholder="Portsmouth number" value={pn} onChange={(e) => setPn(e.target.value)} inputMode="numeric" />
+      <input className="login-input" placeholder="IRC TCC" value={ircTcc} onChange={(e) => setIrcTcc(e.target.value)} inputMode="decimal" />
 
       <div className="edit-class-section">
         <div className="start-classes-label">Move to class:</div>
@@ -141,13 +149,21 @@ function CreateRaceForm({
   const [name, setName] = useState("");
   const [autoCheckIn, setAutoCheckIn] = useState(true);
   const [copyPrevious, setCopyPrevious] = useState(previousRace != null);
+  const [windCondition, setWindCondition] = useState<string>("medium");
+  const [courseLength, setCourseLength] = useState("");
+  const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (!name.trim()) return;
     setBusy(true);
 
-    const raceInfo: Partial<RaceInfo> = { autoCheckIn };
+    const raceInfo: Partial<RaceInfo> = {
+      autoCheckIn,
+      windCondition,
+      courseLength: courseLength.trim() ? Number(courseLength) : undefined,
+      notes: notes.trim() || undefined,
+    };
 
     if (copyPrevious && previousRace) {
       const prevBoats = (previousRace.info.boats || []).map((b) => ({
@@ -213,6 +229,37 @@ function CreateRaceForm({
         />
         <span>Auto check-in boats</span>
       </label>
+
+      <div className="results-config-section">
+        <div className="start-classes-label">Wind conditions:</div>
+        <div className="start-mode-toggle start-mode-toggle--3">
+          {["light", "medium", "heavy"].map((w) => (
+            <button
+              key={w}
+              className={`start-mode-btn ${windCondition === w ? "start-mode-btn--active" : ""}`}
+              onClick={() => setWindCondition(w)}
+            >
+              {w.charAt(0).toUpperCase() + w.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <input
+        className="login-input"
+        placeholder="Course length (nm) — optional"
+        value={courseLength}
+        onChange={(e) => setCourseLength(e.target.value)}
+        inputMode="decimal"
+      />
+
+      <input
+        className="login-input"
+        placeholder="Notes — optional"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+      />
+
       {previousRace && (
         <label className="races-checkbox">
           <input
@@ -394,6 +441,16 @@ function ClassSection({
   const [expanded, setExpanded] = useState(true);
   const [addingBoat, setAddingBoat] = useState(false);
 
+  const classLaps = (race.info.classLaps || {}) as Record<string, number>;
+  const laps = classLaps[className] || 1;
+
+  const setLaps = (newLaps: number) => {
+    updateRaceData(raceId, race.name, {
+      ...race.info,
+      classLaps: { ...classLaps, [className]: Math.max(1, newLaps) },
+    });
+  };
+
   const getBoat = (boatId: number) => boats.find((b) => b.id === boatId);
 
   const removeBoat = (boatId: number) => {
@@ -408,7 +465,10 @@ function ClassSection({
     <div className="race-class-section">
       <button className="race-class-section-header" onClick={() => setExpanded(!expanded)}>
         <span className="race-class-section-name">{className}</span>
-        <span className="race-card-count">{entries.length} boat{entries.length !== 1 ? "s" : ""}</span>
+        <span className="race-card-count">
+          {entries.length} boat{entries.length !== 1 ? "s" : ""}
+          {laps > 1 ? ` · ${laps} laps` : ""}
+        </span>
         <span className={`race-card-chevron ${expanded ? "race-card-chevron--open" : ""}`}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="9 6 15 12 9 18" />
@@ -418,6 +478,16 @@ function ClassSection({
 
       {expanded && (
         <div className="race-class-section-body">
+          {/* Laps control */}
+          <div className="class-laps-row">
+            <span className="start-time-label">Laps:</span>
+            <div className="results-factor-controls">
+              <button className="staged-time-adj" onClick={(e) => { e.stopPropagation(); setLaps(laps - 1); }}>−</button>
+              <span className="results-factor-value">{laps}</span>
+              <button className="staged-time-adj" onClick={(e) => { e.stopPropagation(); setLaps(laps + 1); }}>+</button>
+            </div>
+          </div>
+
           {entries.map((entry) => {
             const boat = getBoat(entry.boatId);
             return (
@@ -474,7 +544,9 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   const [emptyClasses, setEmptyClasses] = useState<string[]>([]);
   const [editName, setEditName] = useState(race.name);
   const [editAutoCheckIn, setEditAutoCheckIn] = useState(race.info.autoCheckIn ?? true);
-  const [editClassLaps, setEditClassLaps] = useState<Record<string, number>>({});
+  const [editWind, setEditWind] = useState<string>((race.info.windCondition as string) || "medium");
+  const [editCourseLength, setEditCourseLength] = useState(race.info.courseLength != null ? String(race.info.courseLength) : "");
+  const [editNotes, setEditNotes] = useState((race.info.notes as string) || "");
   const isSelected = selectedRaceId === race.id;
   const raceBoats = race.info.boats || [];
 
@@ -505,7 +577,9 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
       ...race.info,
       name: editName.trim() || race.name,
       autoCheckIn: editAutoCheckIn,
-      classLaps: editClassLaps,
+      windCondition: editWind,
+      courseLength: editCourseLength.trim() ? Number(editCourseLength) : undefined,
+      notes: editNotes.trim() || undefined,
     });
     setEditingRace(false);
   };
@@ -513,12 +587,9 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   const startEditingRace = () => {
     setEditName(race.name);
     setEditAutoCheckIn(race.info.autoCheckIn ?? true);
-    const existing = (race.info.classLaps || {}) as Record<string, number>;
-    const laps: Record<string, number> = {};
-    classNames.forEach((cls) => {
-      laps[cls] = existing[cls] || 1;
-    });
-    setEditClassLaps(laps);
+    setEditWind((race.info.windCondition as string) || "medium");
+    setEditCourseLength(race.info.courseLength != null ? String(race.info.courseLength) : "");
+    setEditNotes((race.info.notes as string) || "");
     setEditingRace(true);
   };
 
@@ -578,31 +649,37 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
                 />
                 <span>Auto check-in boats</span>
               </label>
-              {Object.keys(editClassLaps).length > 0 && (
-                <div className="edit-laps-section">
-                  <div className="start-classes-label">Laps per class:</div>
-                  {Object.entries(editClassLaps).map(([cls, laps]) => (
-                    <div key={cls} className="results-factor-row">
-                      <span className="results-factor-class">{cls}</span>
-                      <div className="results-factor-controls">
-                        <button
-                          className="staged-time-adj"
-                          onClick={() => setEditClassLaps((prev) => ({ ...prev, [cls]: Math.max(1, laps - 1) }))}
-                        >
-                          −
-                        </button>
-                        <span className="results-factor-value">{laps}</span>
-                        <button
-                          className="staged-time-adj"
-                          onClick={() => setEditClassLaps((prev) => ({ ...prev, [cls]: laps + 1 }))}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
+
+              <div className="results-config-section">
+                <div className="start-classes-label">Wind conditions:</div>
+                <div className="start-mode-toggle start-mode-toggle--3">
+                  {["light", "medium", "heavy"].map((w) => (
+                    <button
+                      key={w}
+                      className={`start-mode-btn ${editWind === w ? "start-mode-btn--active" : ""}`}
+                      onClick={() => setEditWind(w)}
+                    >
+                      {w.charAt(0).toUpperCase() + w.slice(1)}
+                    </button>
                   ))}
                 </div>
-              )}
+              </div>
+
+              <input
+                className="login-input"
+                placeholder="Course length (nm) — optional"
+                value={editCourseLength}
+                onChange={(e) => setEditCourseLength(e.target.value)}
+                inputMode="decimal"
+              />
+
+              <input
+                className="login-input"
+                placeholder="Notes — optional"
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+              />
+
               <div className="races-form-actions">
                 <button className="btn btn-primary" onClick={saveRaceEdit}>Save</button>
                 <button className="btn btn-secondary" onClick={() => setEditingRace(false)}>Cancel</button>

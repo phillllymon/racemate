@@ -5,13 +5,24 @@ import type { RaceBoatEntry, StartInfo } from "./api";
 
 // ---- Scoring types ----
 
-type TimingMethod = "absolute" | "phrf-tot";
+type TimingMode = "absolute" | "corrected";
+type CorrectionMethod = "phrf-tot" | "phrf-tod" | "portsmouth" | "irc";
 type SeriesMethod = "points" | "total-time";
+type WindCondition = "light" | "medium" | "heavy";
+
+const PHRF_TOT_CONSTANTS: Record<WindCondition, { a: number; b: number }> = {
+  light: { a: 650, b: 490 },
+  medium: { a: 650, b: 550 },
+  heavy: { a: 650, b: 610 },
+};
 
 interface ClassFactor {
   className: string;
   factor: number;
 }
+
+// Per-class course length per race: raceId -> className -> distance in nm
+type ClassCourseLengths = Record<string, Record<string, number>>;
 
 interface BoatResult {
   boatId: number;
@@ -69,8 +80,37 @@ function getElapsedTime(
   return elapsed > 0 ? elapsed : null;
 }
 
-function calcPhrfToT(elapsedMs: number, phrf: number): number {
-  return elapsedMs * (650 / (550 + phrf));
+function calcPhrfToT(elapsedMs: number, phrf: number, wind: WindCondition, customAB?: { a: number; b: number }): number {
+  const { a, b } = customAB || PHRF_TOT_CONSTANTS[wind];
+  return elapsedMs * (a / (b + phrf));
+}
+
+function getFleetAverageAB(raceBoats: RaceBoatEntry[], boats: Boat[], c: number): { a: number; b: number } {
+  const ratings = raceBoats
+    .map((rb) => {
+      const boat = boats.find((b) => b.id === rb.boatId);
+      return boat?.info.phrf != null ? Number(boat.info.phrf) : null;
+    })
+    .filter((r) => r != null) as number[];
+  if (ratings.length === 0) return { a: c, b: c - 100 }; // fallback
+  const avg = ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
+  return { a: c, b: Math.round(c - avg) };
+}
+
+function calcPhrfToD(elapsedMs: number, phrf: number, distanceNm: number): number {
+  // CT = ET - (PHRF × Distance) where PHRF is sec/nm and ET is in ms
+  const correctionMs = phrf * distanceNm * 1000;
+  return elapsedMs - correctionMs;
+}
+
+type PortsmouthBase = 100 | 1000;
+
+function calcPortsmouth(elapsedMs: number, pn: number, base: PortsmouthBase): number {
+  return elapsedMs * (base / pn);
+}
+
+function calcIrc(elapsedMs: number, tcc: number): number {
+  return elapsedMs * tcc;
 }
 
 function formatElapsed(ms: number | null): string {
@@ -96,16 +136,24 @@ function statusLabel(status: string): string {
 function calculateRaceResults(
   race: Race,
   boats: Boat[],
-  timingMethod: TimingMethod,
-  classFactors: ClassFactor[]
+  timingMethod: string,
+  classFactors: ClassFactor[],
+  wind: WindCondition,
+  classCourseLengths: Record<string, number>,
+  portsmouthBase: PortsmouthBase,
+  useFleetAvg: boolean
 ): RaceResults {
   const raceBoats = race.info.boats || [];
   const starts = race.info.starts || [];
   const classLaps = (race.info.classLaps || {}) as Record<string, number>;
 
+  // Compute fleet average A/B if needed
+  const fleetAB = useFleetAvg ? getFleetAverageAB(raceBoats, boats, 650) : undefined;
+
   const results: BoatResult[] = raceBoats.map((rb) => {
     const boat = boats.find((b) => b.id === rb.boatId);
     const phrf = boat?.info.phrf != null ? Number(boat.info.phrf) : null;
+    const pn = boat?.info.portsmouthNumber != null ? Number(boat.info.portsmouthNumber) : null;
     const elapsedMs = getElapsedTime(rb, starts);
     const totalLaps = classLaps[rb.class] || 1;
     const lapsCompleted = (rb.lapsCompleted as number) || (rb.finishTime != null ? totalLaps : 0);
@@ -117,7 +165,20 @@ function calculateRaceResults(
 
     let correctedMs: number | null = null;
     if (adjustedElapsed != null && timingMethod === "phrf-tot" && phrf != null) {
-      correctedMs = calcPhrfToT(adjustedElapsed, phrf);
+      correctedMs = calcPhrfToT(adjustedElapsed, phrf, wind, fleetAB);
+    } else if (adjustedElapsed != null && timingMethod === "phrf-tod" && phrf != null) {
+      const courseNm = classCourseLengths[rb.class] || 0;
+      const totalDistance = courseNm * totalLaps;
+      if (totalDistance > 0) {
+        correctedMs = calcPhrfToD(adjustedElapsed, phrf, totalDistance);
+      }
+    } else if (adjustedElapsed != null && timingMethod === "portsmouth" && pn != null) {
+      correctedMs = calcPortsmouth(adjustedElapsed, pn, portsmouthBase);
+    } else if (adjustedElapsed != null && timingMethod === "irc") {
+      const tcc = boat?.info.ircTcc != null ? Number(boat.info.ircTcc) : null;
+      if (tcc != null) {
+        correctedMs = calcIrc(adjustedElapsed, tcc);
+      }
     } else if (adjustedElapsed != null && timingMethod === "absolute") {
       correctedMs = adjustedElapsed;
     }
@@ -179,30 +240,61 @@ function calculateRaceResults(
 function calculateSeriesResults(
   seriesRaces: Race[],
   boats: Boat[],
-  timingMethod: TimingMethod,
+  timingMethod: string,
   seriesMethod: SeriesMethod,
   drops: number,
-  classFactors: ClassFactor[]
+  classFactors: ClassFactor[],
+  raceWindMap: Record<number, WindCondition>,
+  allClassCourseLengths: ClassCourseLengths,
+  portsmouthBase: PortsmouthBase,
+  dnfPenaltyFactor: number,
+  useFleetAvg: boolean
 ): SeriesBoatResult[] {
   const allRaceResults = seriesRaces.map((race) =>
-    calculateRaceResults(race, boats, timingMethod, classFactors)
+    calculateRaceResults(race, boats, timingMethod, classFactors, raceWindMap[race.id] || "medium", allClassCourseLengths[String(race.id)] || {}, portsmouthBase, useFleetAvg)
   );
 
   const boatIds = new Set<number>();
   allRaceResults.forEach((rr) => rr.boats.forEach((b) => boatIds.add(b.boatId)));
 
+  // Pre-compute penalty values per race
+  const racePenalties = allRaceResults.map((rr) => {
+    const fleetSize = rr.boats.length;
+    const penaltyRank = fleetSize + 1;
+    const finishedTimes = rr.boats
+      .map((b) => b.correctedMs)
+      .filter((t) => t != null) as number[];
+    const slowestTime = finishedTimes.length > 0 ? Math.max(...finishedTimes) : null;
+    const penaltyTime = slowestTime != null ? Math.round(slowestTime * dnfPenaltyFactor) : null;
+    return { raceId: rr.raceId, penaltyRank, penaltyTime };
+  });
+
   const seriesResults: SeriesBoatResult[] = Array.from(boatIds).map((boatId) => {
     const boat = boats.find((b) => b.id === boatId);
     const firstResult = allRaceResults.flatMap((rr) => rr.boats).find((b) => b.boatId === boatId);
 
-    const raceResults = allRaceResults.map((rr) => {
+    const raceResults = allRaceResults.map((rr, raceIdx) => {
       const result = rr.boats.find((b) => b.boatId === boatId);
+      const penalty = racePenalties[raceIdx];
+
+      // If boat wasn't in this race or didn't finish, apply penalties
+      const didFinish = result?.correctedMs != null;
+      let overallRank = result?.overallRank ?? null;
+      let correctedMs = result?.correctedMs ?? null;
+
+      if (!didFinish) {
+        // Points: fleet size + 1
+        if (overallRank == null) overallRank = penalty.penaltyRank;
+        // Time: 1.5× slowest finisher (if anyone finished)
+        if (correctedMs == null && penalty.penaltyTime != null) correctedMs = penalty.penaltyTime;
+      }
+
       return {
         raceId: rr.raceId,
         classRank: result?.classRank ?? null,
-        overallRank: result?.overallRank ?? null,
+        overallRank,
         elapsedMs: result?.elapsedMs ?? null,
-        correctedMs: result?.correctedMs ?? null,
+        correctedMs,
         dropped: false,
         status: result?.status ?? "DNS",
       };
@@ -515,7 +607,41 @@ function PhrfWarning({ raceBoats, boats }: { raceBoats: RaceBoatEntry[]; boats: 
       <span className="results-warning-icon">⚠</span>
       <span>
         {missing.length} boat{missing.length !== 1 ? "s" : ""} missing PHRF rating.
-        Add ratings in the Races tab.
+        Add ratings in the Series tab.
+      </span>
+    </div>
+  );
+}
+
+function PortsmouthWarning({ raceBoats, boats }: { raceBoats: RaceBoatEntry[]; boats: Boat[] }) {
+  const missing = raceBoats.filter((rb) => {
+    const boat = boats.find((b) => b.id === rb.boatId);
+    return boat?.info.portsmouthNumber == null;
+  });
+  if (missing.length === 0) return null;
+  return (
+    <div className="results-warning">
+      <span className="results-warning-icon">⚠</span>
+      <span>
+        {missing.length} boat{missing.length !== 1 ? "s" : ""} missing Portsmouth number.
+        Add ratings in the Series tab.
+      </span>
+    </div>
+  );
+}
+
+function IrcWarning({ raceBoats, boats }: { raceBoats: RaceBoatEntry[]; boats: Boat[] }) {
+  const missing = raceBoats.filter((rb) => {
+    const boat = boats.find((b) => b.id === rb.boatId);
+    return boat?.info.ircTcc == null;
+  });
+  if (missing.length === 0) return null;
+  return (
+    <div className="results-warning">
+      <span className="results-warning-icon">⚠</span>
+      <span>
+        {missing.length} boat{missing.length !== 1 ? "s" : ""} missing IRC TCC rating.
+        Add ratings in the Series tab.
       </span>
     </div>
   );
@@ -739,9 +865,12 @@ function exportSeriesCSVWithSummary(
 // ---- Main ResultsTab ----
 
 export default function ResultsTab() {
-  const { selectedRace, races, series, boats } = useRaces();
+  const { selectedRace, races, series, boats, updateSeriesData, updateRaceData } = useRaces();
   const [viewMode, setViewMode] = useState<"race" | "series">("race");
-  const [timingMethod, setTimingMethod] = useState<TimingMethod>("absolute");
+  const [timingMode, setTimingMode] = useState<TimingMode>("absolute");
+  const [correctionMethod, setCorrectionMethod] = useState<CorrectionMethod>("phrf-tot");
+  const [portsmouthBase, setPortsmouthBase] = useState<PortsmouthBase>(1000);
+  const [useFleetAverage, setUseFleetAverage] = useState(false);
   const [seriesMethod, setSeriesMethod] = useState<SeriesMethod>("points");
   const [drops, setDrops] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -749,6 +878,39 @@ export default function ResultsTab() {
   const [visibleCols, setVisibleCols] = useState<Set<RaceColId>>(defaultVisibleCols);
   const [topN, setTopN] = useState(3);
   const [summaryOpen, setSummaryOpen] = useState(true);
+  const [windPerRaceOpen, setWindPerRaceOpen] = useState(false);
+  const [raceWindConditions, setRaceWindConditions] = useState<Record<number, WindCondition>>({});
+  const [classCourseLengths, setClassCourseLengths] = useState<ClassCourseLengths>({});
+
+  const getWindCondition = (raceId: number): WindCondition => {
+    if (raceWindConditions[raceId]) return raceWindConditions[raceId];
+    const race = races.find((r) => r.id === raceId);
+    const stored = race?.info.windCondition as string | undefined;
+    if (stored === "light" || stored === "medium" || stored === "heavy") return stored;
+    return "medium";
+  };
+  const setWindForRace = (raceId: number, wind: WindCondition) => {
+    setRaceWindConditions((prev) => ({ ...prev, [raceId]: wind }));
+    // Also persist to race record
+    const race = races.find((r) => r.id === raceId);
+    if (race) {
+      updateRaceData(raceId, race.name, { ...race.info, windCondition: wind });
+    }
+  };
+
+  const getClassCourseLength = (raceId: number, cls: string): number => {
+    const override = classCourseLengths[String(raceId)]?.[cls];
+    if (override != null) return override;
+    // Fall back to race's stored course length
+    const race = races.find((r) => r.id === raceId);
+    return race?.info.courseLength != null ? Number(race.info.courseLength) : 0;
+  };
+  const setClassCourseLength = (raceId: number, cls: string, nm: number) => {
+    setClassCourseLengths((prev) => ({
+      ...prev,
+      [String(raceId)]: { ...(prev[String(raceId)] || {}), [cls]: nm },
+    }));
+  };
 
   const toggleCol = (id: string) => {
     setVisibleCols((prev) => {
@@ -762,7 +924,7 @@ export default function ResultsTab() {
   if (!selectedRace) {
     return (
       <div className="tab-placeholder">
-        <p>Select a race in the Races tab</p>
+        <p>Select a race in the Series tab</p>
       </div>
     );
   }
@@ -795,10 +957,39 @@ export default function ResultsTab() {
         .filter(Boolean) as Race[]
     : [selectedRace];
 
-  const raceResults = calculateRaceResults(selectedRace, boats, timingMethod, effectiveFactors);
+  const dnfPenaltyFactor = (parentSeries?.info as any)?.dnfPenaltyFactor ?? 1.5;
+  const setDnfPenaltyFactor = (factor: number) => {
+    if (!parentSeries) return;
+    updateSeriesData(parentSeries.id, parentSeries.name, {
+      ...parentSeries.info,
+      dnfPenaltyFactor: factor,
+    });
+  };
+
+  // Derive effective timing method for calculations
+  const timingMethod = timingMode === "absolute" ? "absolute" : correctionMethod;
+
+  // Build effective class course lengths for current race
+  const currentRaceCourseLengths: Record<string, number> = {};
+  allClasses.forEach((cls) => {
+    currentRaceCourseLengths[cls] = getClassCourseLength(selectedRace.id, cls);
+  });
+
+  const raceResults = calculateRaceResults(selectedRace, boats, timingMethod, effectiveFactors, getWindCondition(selectedRace.id), currentRaceCourseLengths, portsmouthBase, useFleetAverage);
+
+  // Build course lengths for all series races
+  const allSeriesCourseLengths: ClassCourseLengths = {};
+  seriesRaces.forEach((race) => {
+    const raceClasses = Array.from(new Set((race.info.boats || []).map((b) => b.class)));
+    const lengths: Record<string, number> = {};
+    raceClasses.forEach((cls) => {
+      lengths[cls] = getClassCourseLength(race.id, cls);
+    });
+    allSeriesCourseLengths[String(race.id)] = lengths;
+  });
 
   const seriesResults = parentSeries && seriesRaces.length > 1
-    ? calculateSeriesResults(seriesRaces, boats, timingMethod, seriesMethod, drops, effectiveFactors)
+    ? calculateSeriesResults(seriesRaces, boats, timingMethod, seriesMethod, drops, effectiveFactors, raceWindConditions, allSeriesCourseLengths, portsmouthBase, dnfPenaltyFactor, useFleetAverage)
     : null;
 
   const hasMultipleRaces = parentSeries && seriesRaces.length > 1;
@@ -837,25 +1028,246 @@ export default function ResultsTab() {
         {settingsOpen && (
           <div className="results-settings-body">
             <div className="results-config-section">
-              <div className="start-classes-label">Timing method:</div>
+              <div className="start-classes-label">Timing:</div>
               <div className="start-mode-toggle">
                 <button
-                  className={`start-mode-btn ${timingMethod === "absolute" ? "start-mode-btn--active" : ""}`}
-                  onClick={() => setTimingMethod("absolute")}
+                  className={`start-mode-btn ${timingMode === "absolute" ? "start-mode-btn--active" : ""}`}
+                  onClick={() => setTimingMode("absolute")}
                 >
-                  Absolute
+                  Absolute Time
                 </button>
                 <button
-                  className={`start-mode-btn ${timingMethod === "phrf-tot" ? "start-mode-btn--active" : ""}`}
-                  onClick={() => setTimingMethod("phrf-tot")}
+                  className={`start-mode-btn ${timingMode === "corrected" ? "start-mode-btn--active" : ""}`}
+                  onClick={() => setTimingMode("corrected")}
                 >
-                  PHRF
+                  Corrected Time
                 </button>
               </div>
             </div>
 
-            {timingMethod === "phrf-tot" && (
-              <PhrfWarning raceBoats={raceBoats} boats={boats} />
+            {timingMode === "corrected" && (
+              <>
+                <div className="results-config-section">
+                  <div className="start-classes-label">Correction method:</div>
+                  <div className="results-method-select">
+                    <button
+                      className={`results-method-option ${correctionMethod === "phrf-tot" ? "results-method-option--active" : ""}`}
+                      onClick={() => setCorrectionMethod("phrf-tot")}
+                    >
+                      PHRF Time-on-Time
+                    </button>
+                    <button
+                      className={`results-method-option ${correctionMethod === "phrf-tod" ? "results-method-option--active" : ""}`}
+                      onClick={() => setCorrectionMethod("phrf-tod")}
+                    >
+                      PHRF Time-on-Distance
+                    </button>
+                    <button
+                      className={`results-method-option ${correctionMethod === "portsmouth" ? "results-method-option--active" : ""}`}
+                      onClick={() => setCorrectionMethod("portsmouth")}
+                    >
+                      Portsmouth Yardstick
+                    </button>
+                    <button
+                      className={`results-method-option ${correctionMethod === "irc" ? "results-method-option--active" : ""}`}
+                      onClick={() => setCorrectionMethod("irc")}
+                    >
+                      IRC
+                    </button>
+                  </div>
+                </div>
+
+                {/* PHRF Time-on-Time settings */}
+                {correctionMethod === "phrf-tot" && (
+                  <>
+                    <div className="results-config-section">
+                      <label className="races-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={useFleetAverage}
+                          onChange={(e) => setUseFleetAverage(e.target.checked)}
+                        />
+                        <span>Use fleet average for B constant</span>
+                      </label>
+                    </div>
+
+                    {useFleetAverage ? (
+                      <div className="results-fleet-avg-info">
+                        Fleet avg PHRF: {(() => {
+                          const ratings = raceBoats
+                            .map((rb) => {
+                              const boat = boats.find((b) => b.id === rb.boatId);
+                              return boat?.info.phrf != null ? Number(boat.info.phrf) : null;
+                            })
+                            .filter((r) => r != null) as number[];
+                          if (ratings.length === 0) return "—";
+                          const avg = ratings.reduce((s, r) => s + r, 0) / ratings.length;
+                          return `${avg.toFixed(0)} → B = ${Math.round(650 - avg)}`;
+                        })()}
+                      </div>
+                    ) : (
+                      <>
+                        {viewMode === "race" && (
+                      <div className="results-config-section">
+                        <div className="start-classes-label">Wind conditions:</div>
+                        <div className="start-mode-toggle start-mode-toggle--3">
+                          {(["light", "medium", "heavy"] as WindCondition[]).map((w) => (
+                            <button
+                              key={w}
+                              className={`start-mode-btn ${getWindCondition(selectedRace.id) === w ? "start-mode-btn--active" : ""}`}
+                              onClick={() => setWindForRace(selectedRace.id, w)}
+                            >
+                              {w.charAt(0).toUpperCase() + w.slice(1)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {viewMode === "series" && hasMultipleRaces && (
+                      <div className="results-config-section">
+                        <button className="results-wind-toggle" onClick={() => setWindPerRaceOpen(!windPerRaceOpen)}>
+                          <span className="start-classes-label">Wind conditions per race</span>
+                          <span className={`race-card-chevron ${windPerRaceOpen ? "race-card-chevron--open" : ""}`}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="9 6 15 12 9 18" />
+                            </svg>
+                          </span>
+                        </button>
+                        {windPerRaceOpen && seriesRaces.map((race) => (
+                          <div key={race.id} className="results-wind-race-row">
+                            <span className="results-wind-race-name">{race.name}</span>
+                            <div className="start-mode-toggle start-mode-toggle--3 start-mode-toggle--sm">
+                              {(["light", "medium", "heavy"] as WindCondition[]).map((w) => (
+                                <button
+                                  key={w}
+                                  className={`start-mode-btn ${getWindCondition(race.id) === w ? "start-mode-btn--active" : ""}`}
+                                  onClick={() => setWindForRace(race.id, w)}
+                                >
+                                  {w.charAt(0).toUpperCase() + w.slice(1)}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    </>
+                    )}
+                    <PhrfWarning raceBoats={raceBoats} boats={boats} />
+                  </>
+                )}
+
+                {/* PHRF Time-on-Distance settings */}
+                {correctionMethod === "phrf-tod" && (
+                  <>
+                    {viewMode === "race" && (
+                      <div className="results-config-section">
+                        <div className="start-classes-label">Course length per class (nm):</div>
+                        {allClasses.map((cls) => {
+                          const classLaps = (selectedRace.info.classLaps || {}) as Record<string, number>;
+                          const laps = classLaps[cls] || 1;
+                          const courseNm = getClassCourseLength(selectedRace.id, cls);
+                          const totalDist = courseNm * laps;
+                          return (
+                            <div key={cls} className="results-wind-race-row">
+                              <span className="results-wind-race-name">{cls}</span>
+                              <input
+                                className="login-input results-course-input"
+                                placeholder=""
+                                inputMode="decimal"
+                                value={courseNm || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value.trim();
+                                  setClassCourseLength(selectedRace.id, cls, val ? Number(val) : 0);
+                                }}
+                              />
+                              <span className="results-course-unit">nm</span>
+                              {laps > 1 && (
+                                <span className="results-course-total">×{laps} = {totalDist.toFixed(1)} nm</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {viewMode === "series" && hasMultipleRaces && (
+                      <div className="results-config-section">
+                        <button className="results-wind-toggle" onClick={() => setWindPerRaceOpen(!windPerRaceOpen)}>
+                          <span className="start-classes-label">Course lengths per race</span>
+                          <span className={`race-card-chevron ${windPerRaceOpen ? "race-card-chevron--open" : ""}`}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="9 6 15 12 9 18" />
+                            </svg>
+                          </span>
+                        </button>
+                        {windPerRaceOpen && seriesRaces.map((race) => {
+                          const raceClasses = Array.from(new Set((race.info.boats || []).map((b) => b.class)));
+                          const classLaps = (race.info.classLaps || {}) as Record<string, number>;
+                          return (
+                            <div key={race.id} className="results-tod-race-group">
+                              <div className="results-tod-race-label">{race.name}</div>
+                              {raceClasses.map((cls) => {
+                                const laps = classLaps[cls] || 1;
+                                const courseNm = getClassCourseLength(race.id, cls);
+                                const totalDist = courseNm * laps;
+                                return (
+                                  <div key={cls} className="results-wind-race-row">
+                                    <span className="results-wind-race-name">{cls}</span>
+                                    <input
+                                      className="login-input results-course-input"
+                                      placeholder=""
+                                      inputMode="decimal"
+                                      value={courseNm || ""}
+                                      onChange={(e) => {
+                                        const val = e.target.value.trim();
+                                        setClassCourseLength(race.id, cls, val ? Number(val) : 0);
+                                      }}
+                                    />
+                                    <span className="results-course-unit">nm</span>
+                                    {laps > 1 && (
+                                      <span className="results-course-total">×{laps} = {totalDist.toFixed(1)} nm</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <PhrfWarning raceBoats={raceBoats} boats={boats} />
+                  </>
+                )}
+
+                {/* Portsmouth settings */}
+                {correctionMethod === "portsmouth" && (
+                  <>
+                    <div className="results-config-section">
+                      <div className="start-classes-label">Reference number:</div>
+                      <div className="start-mode-toggle">
+                        <button
+                          className={`start-mode-btn ${portsmouthBase === 1000 ? "start-mode-btn--active" : ""}`}
+                          onClick={() => setPortsmouthBase(1000)}
+                        >
+                          1000
+                        </button>
+                        <button
+                          className={`start-mode-btn ${portsmouthBase === 100 ? "start-mode-btn--active" : ""}`}
+                          onClick={() => setPortsmouthBase(100)}
+                        >
+                          100
+                        </button>
+                      </div>
+                    </div>
+                    <PortsmouthWarning raceBoats={raceBoats} boats={boats} />
+                  </>
+                )}
+
+                {/* IRC settings */}
+                {correctionMethod === "irc" && (
+                  <IrcWarning raceBoats={raceBoats} boats={boats} />
+                )}
+              </>
             )}
 
             {hasMultipleRaces && viewMode === "series" && (
@@ -898,10 +1310,31 @@ export default function ResultsTab() {
                     </button>
                   </div>
                 </div>
+
+                {seriesMethod === "total-time" && (
+                  <div className="results-config-section">
+                    <div className="start-classes-label">
+                      DNF penalty: {dnfPenaltyFactor.toFixed(1)}× slowest finisher
+                    </div>
+                    <div className="results-drops">
+                      <button
+                        className="staged-time-adj"
+                        onClick={() => setDnfPenaltyFactor(Math.max(1, Math.round((dnfPenaltyFactor - 0.1) * 10) / 10))}
+                      >
+                        −
+                      </button>
+                      <span className="results-drops-value">{dnfPenaltyFactor.toFixed(1)}</span>
+                      <button
+                        className="staged-time-adj"
+                        onClick={() => setDnfPenaltyFactor(Math.round((dnfPenaltyFactor + 0.1) * 10) / 10)}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
-
-            {/* Class time adjustment factors */}
             {allClasses.length > 0 && (
               <div className="results-config-section">
                 <div className="start-classes-label">Class time factors:</div>

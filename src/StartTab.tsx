@@ -786,7 +786,7 @@ function StartCard({
                 ))}
               </div>
               {allClasses.length === 0 && (
-                <p className="races-empty">No classes — add boats with classes in the Races tab</p>
+                <p className="races-empty">No classes — add boats with classes in the Series tab</p>
               )}
               <div className="start-classes-label">Start time:</div>
               <TimePicker
@@ -951,7 +951,7 @@ export default function StartTab() {
   if (!selectedRace) {
     return (
       <div className="tab-placeholder">
-        <p>Select a race in the Races tab</p>
+        <p>Select a race in the Series tab</p>
       </div>
     );
   }

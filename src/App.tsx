@@ -25,11 +25,21 @@ function MainApp() {
         />
 
         <div className="app-body">
-          {activeTab === "races" && <RacesTab />}
-          {activeTab === "start" && <StartTab />}
-          {activeTab === "chart" && <ChartTab />}
-          {activeTab === "finish" && <FinishTab />}
-          {activeTab === "results" && <ResultsTab />}
+          <div className={`app-tab-pane ${activeTab === "races" ? "app-tab-pane--active" : ""}`}>
+            <RacesTab />
+          </div>
+          <div className={`app-tab-pane ${activeTab === "start" ? "app-tab-pane--active" : ""}`}>
+            <StartTab />
+          </div>
+          <div className={`app-tab-pane ${activeTab === "chart" ? "app-tab-pane--active" : ""}`}>
+            <ChartTab />
+          </div>
+          <div className={`app-tab-pane ${activeTab === "finish" ? "app-tab-pane--active" : ""}`}>
+            <FinishTab />
+          </div>
+          <div className={`app-tab-pane ${activeTab === "results" ? "app-tab-pane--active" : ""}`}>
+            <ResultsTab />
+          </div>
         </div>
 
         <TabBar active={activeTab} onChange={setActiveTab} />
