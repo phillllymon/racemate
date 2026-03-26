@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRaces } from "./RaceContext";
 import { useTime } from "./TimeContext";
@@ -144,20 +144,25 @@ function MinutePicker({
 
 function CreateStartForm({
   existingStarts,
-  availableClasses,
+  allClasses,
+  takenClasses,
   onSave,
   onCancel,
 }: {
   existingStarts: StartInfo[];
-  availableClasses: string[];
+  allClasses: string[];
+  takenClasses: Set<string>;
   onSave: (start: StartInfo) => void;
   onCancel: () => void;
 }) {
   const { now } = useTime();
   const lastStart = existingStarts.length > 0 ? existingStarts[existingStarts.length - 1] : null;
+  const isFirstStart = existingStarts.length === 0;
 
-  // Pre-select all available classes
-  const [selectedClasses, setSelectedClasses] = useState<string[]>(availableClasses);
+  // First start: pre-select all classes. Subsequent starts: none selected
+  const [selectedClasses, setSelectedClasses] = useState<string[]>(
+    isFirstStart ? allClasses : []
+  );
   const [timeMode, setTimeMode] = useState<"absolute" | "relative">("absolute");
 
   // Absolute time state - default to next round 5 minutes
@@ -192,7 +197,7 @@ function CreateStartForm({
       startTime = d.getTime();
     }
 
-    const classes = selectedClasses.length > 0 ? selectedClasses : ["Default"];
+    const classes = selectedClasses;
     const sequence: SequenceStep[] = copyPrevious && lastStart?.sequence
       ? [...lastStart.sequence]
       : [];
@@ -211,15 +216,20 @@ function CreateStartForm({
 
       <div className="start-classes-label">Classes in this start:</div>
       <div className="edit-class-picks">
-        {availableClasses.map((cls) => (
-          <button
-            key={cls}
-            className={`edit-class-chip ${selectedClasses.includes(cls) ? "edit-class-chip--active" : ""}`}
-            onClick={() => toggleClass(cls)}
-          >
-            {cls}
-          </button>
-        ))}
+        {allClasses.map((cls) => {
+          const selected = selectedClasses.includes(cls);
+          const taken = takenClasses.has(cls);
+          return (
+            <button
+              key={cls}
+              className={`edit-class-chip ${selected ? "edit-class-chip--active" : ""} ${taken ? "edit-class-chip--disabled" : ""}`}
+              disabled={taken}
+              onClick={() => toggleClass(cls)}
+            >
+              {cls}
+            </button>
+          );
+        })}
       </div>
 
       {lastStart && (
@@ -454,12 +464,7 @@ function BoatCheckInList({
                 Check In
               </button>
             )}
-            {rb.status === "over-early" && (
-              <button className="btn-check-in btn-clear" onClick={() => onUpdateStatus(rb.boatId, "racing")}>
-                Cleared
-              </button>
-            )}
-            {rb.status !== "signed-up" && rb.status !== "over-early" && !isEditingStatus && (
+            {rb.status !== "signed-up" && !isEditingStatus && (
               <>
                 <span className={`checkin-status checkin-status--${rb.status}`}>{rb.status}</span>
                 <button
@@ -511,21 +516,23 @@ function PostStartPanel({
   startClasses,
   onUpdateStatus,
   onAllClear,
+  onBulkStatus,
 }: {
   boats: Boat[];
   raceBoats: RaceBoatEntry[];
   startClasses: string[];
   onUpdateStatus: (boatId: number, status: string) => void;
   onAllClear: () => void;
+  onBulkStatus: (updates: Array<{ boatId: number; status: string }>) => void;
 }) {
   const [ocsSearch, setOcsSearch] = useState("");
   const boatsInStart = raceBoats.filter((rb) => startClasses.includes(rb.class));
   const overEarlyBoats = boatsInStart.filter((rb) => rb.status === "over-early");
-  const allRacing = boatsInStart.every((rb) => rb.status === "racing" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ");
+  const racingBoats = boatsInStart.filter((rb) => rb.status === "racing");
   const getBoat = (id: number) => boats.find((b) => b.id === id);
 
-  const eligibleBoats = boatsInStart.filter((rb) => rb.status === "checked-in" || rb.status === "over-early");
-  const filteredBoats = eligibleBoats.filter((rb) => {
+  // Search only filters racing boats (over-early always show)
+  const filteredRacing = racingBoats.filter((rb) => {
     if (!ocsSearch.trim()) return true;
     const s = ocsSearch.toLowerCase();
     const boat = getBoat(rb.boatId);
@@ -539,59 +546,81 @@ function PostStartPanel({
 
   return (
     <div className="post-start">
-      {!allRacing && (
-        <>
-          <button className="btn btn-primary" onClick={onAllClear}>
-            All Clear — No Boats Over Early
-          </button>
-          <div className="post-start-divider">or select boats over the line early:</div>
-          <input
-            className="login-input"
-            placeholder="Search boats..."
-            value={ocsSearch}
-            onChange={(e) => setOcsSearch(e.target.value)}
-          />
-          <div className="post-start-scroll">
-            {filteredBoats.map((rb) => {
-              const boat = getBoat(rb.boatId);
-              const isOver = rb.status === "over-early";
-              return (
-                <div key={rb.boatId} className={`checkin-row ${isOver ? "checkin-row--over" : ""}`}>
-                  <div className="checkin-boat-info">
-                    <span className="checkin-boat-name">{boat?.name || `#${rb.boatId}`}</span>
-                    {boat?.info.sailNumber && (
-                      <span className="checkin-boat-sail">{boat.info.sailNumber}</span>
-                    )}
-                    <span className="checkin-boat-class">{rb.class}</span>
-                  </div>
-                  {isOver ? (
-                    <button className="btn-check-in btn-clear" onClick={() => onUpdateStatus(rb.boatId, "racing")}>
-                      Cleared
-                    </button>
-                  ) : (
-                    <button className="btn-check-in btn-ocs" onClick={() => onUpdateStatus(rb.boatId, "over-early")}>
-                      Over Early
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-            {filteredBoats.length === 0 && (
-              <p className="races-empty">No boats{ocsSearch.trim() ? " match search" : ""}</p>
-            )}
-          </div>
-          {overEarlyBoats.length > 0 && (
-            <button className="btn btn-secondary" onClick={() => {
-              overEarlyBoats.forEach((rb) => onUpdateStatus(rb.boatId, "OCS"));
-              boatsInStart.filter((rb) => rb.status === "checked-in").forEach((rb) => onUpdateStatus(rb.boatId, "racing"));
-            }}>
-              Confirm OCS &amp; Start Racing
-            </button>
-          )}
-        </>
+      {/* All Clear — only show if no boats are marked over early */}
+      {overEarlyBoats.length === 0 && (
+        <button className="btn btn-primary" onClick={onAllClear}>
+          All Clear — No Boats Over Early
+        </button>
       )}
-      {allRacing && (
-        <div className="post-start-clear">All boats accounted for</div>
+
+      {/* Over early boats — always visible */}
+      {overEarlyBoats.length > 0 && (
+        <div className="post-start-over-section">
+          <div className="post-start-over-label">
+            Over early ({overEarlyBoats.length}):
+          </div>
+          {overEarlyBoats.map((rb) => {
+            const boat = getBoat(rb.boatId);
+            return (
+              <div key={rb.boatId} className="checkin-row checkin-row--over">
+                <div className="checkin-boat-info">
+                  <span className="checkin-boat-name">{boat?.name || `#${rb.boatId}`}</span>
+                  {boat?.info.sailNumber && (
+                    <span className="checkin-boat-sail">{boat.info.sailNumber}</span>
+                  )}
+                  <span className="checkin-boat-class">{rb.class}</span>
+                </div>
+                <button className="btn-check-in btn-clear" onClick={() => onUpdateStatus(rb.boatId, "racing")}>
+                  Clear
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Search and mark racing boats as over early */}
+      <div className="post-start-divider">
+        {overEarlyBoats.length > 0 ? "Mark more boats over early:" : "Select boats over the line early:"}
+      </div>
+      <input
+        className="login-input"
+        placeholder="Search boats..."
+        value={ocsSearch}
+        onChange={(e) => setOcsSearch(e.target.value)}
+      />
+      <div className="post-start-scroll">
+        {filteredRacing.map((rb) => {
+          const boat = getBoat(rb.boatId);
+          return (
+            <div key={rb.boatId} className="checkin-row">
+              <div className="checkin-boat-info">
+                <span className="checkin-boat-name">{boat?.name || `#${rb.boatId}`}</span>
+                {boat?.info.sailNumber && (
+                  <span className="checkin-boat-sail">{boat.info.sailNumber}</span>
+                )}
+                <span className="checkin-boat-class">{rb.class}</span>
+              </div>
+              <button className="btn-check-in btn-ocs" onClick={() => onUpdateStatus(rb.boatId, "over-early")}>
+                Over Early
+              </button>
+            </div>
+          );
+        })}
+        {filteredRacing.length === 0 && (
+          <p className="races-empty">No boats{ocsSearch.trim() ? " match search" : ""}</p>
+        )}
+      </div>
+
+      {/* Confirm OCS — when there are over-early boats */}
+      {overEarlyBoats.length > 0 && (
+        <button className="btn btn-secondary" onClick={() => {
+          const updates: Array<{ boatId: number; status: string }> = [];
+          overEarlyBoats.forEach((rb) => updates.push({ boatId: rb.boatId, status: "OCS" }));
+          onBulkStatus(updates);
+        }}>
+          Confirm {overEarlyBoats.length} OCS
+        </button>
       )}
     </div>
   );
@@ -605,8 +634,10 @@ function StartCard({
   raceBoats,
   allBoats,
   allClasses,
+  otherStartClasses,
   onUpdateStart,
   onUpdateBoatStatus,
+  onBulkStatus,
   onRecall,
 }: {
   start: StartInfo;
@@ -614,8 +645,10 @@ function StartCard({
   raceBoats: RaceBoatEntry[];
   allBoats: Boat[];
   allClasses: string[];
+  otherStartClasses: Set<string>;
   onUpdateStart: (updated: StartInfo) => void;
   onUpdateBoatStatus: (boatId: number, status: string) => void;
+  onBulkStatus: (updates: Array<{ boatId: number; status: string }>) => void;
   onRecall: (startId: string) => void;
 }) {
   const { now } = useTime();
@@ -624,12 +657,34 @@ function StartCard({
   const [showBoats, setShowBoats] = useState(false);
   const [boatSearch, setBoatSearch] = useState("");
   const [dismissedNotifications, setDismissedNotifications] = useState<Set<number>>(new Set());
+  const [ocsComplete, setOcsComplete] = useState(false);
   const [editingStart, setEditingStart] = useState(false);
   const [editName, setEditName] = useState<string>("");
   const [editClasses, setEditClasses] = useState<string[]>(start.classes);
   const [editHours, setEditHours] = useState(0);
   const [editMinutes, setEditMinutes] = useState(0);
   const [editSeconds, setEditSeconds] = useState(0);
+  const hasTransitioned = useRef(false);
+
+  // Auto-transition boats when countdown reaches zero
+  const startTime = start.startTime;
+  const hasStarted = startTime != null && now >= startTime;
+
+  useEffect(() => {
+    if (hasStarted && !hasTransitioned.current) {
+      hasTransitioned.current = true;
+      const boatsInThisStart = raceBoats.filter((rb) => start.classes.includes(rb.class));
+      const updates: Array<{ boatId: number; status: string }> = [];
+      boatsInThisStart.forEach((rb) => {
+        if (rb.status === "checked-in") updates.push({ boatId: rb.boatId, status: "racing" });
+        else if (rb.status === "signed-up") updates.push({ boatId: rb.boatId, status: "DNS" });
+      });
+      if (updates.length > 0) onBulkStatus(updates);
+    }
+    if (!hasStarted) {
+      hasTransitioned.current = false;
+    }
+  }, [hasStarted]);
 
   const startEditing = () => {
     setEditName((start.name as string) || "");
@@ -656,9 +711,8 @@ function StartCard({
 
     // If moving start time to the future and start had already occurred,
     // reset boats in this start back to checked-in so OCS flow triggers again
-    const classes = editClasses.length > 0 ? editClasses : start.classes;
     if (newTime > now && start.startTime != null && start.startTime <= now) {
-      const boatsInThisStart = raceBoats.filter((rb) => classes.includes(rb.class));
+      const boatsInThisStart = raceBoats.filter((rb) => editClasses.includes(rb.class));
       boatsInThisStart.forEach((rb) => {
         if (rb.status === "racing" || rb.status === "over-early" || rb.status === "OCS") {
           onUpdateBoatStatus(rb.boatId, "checked-in");
@@ -666,28 +720,29 @@ function StartCard({
       });
       // Clear dismissed notifications so they fire again
       setDismissedNotifications(new Set());
+      setOcsComplete(false);
+      hasTransitioned.current = false;
     }
 
     onUpdateStart({
       ...start,
       name: editName.trim() || undefined,
-      classes,
+      classes: editClasses,
       startTime: newTime,
     });
     setEditingStart(false);
   };
 
-  const startTime = start.startTime;
-  const hasStarted = startTime != null && now >= startTime;
   const timeUntilStart = startTime != null ? startTime - now : null;
 
   // Determine start phase
   const boatsInStart = raceBoats.filter((rb) => start.classes.includes(rb.class));
-  const allRacing = boatsInStart.length > 0 && boatsInStart.every(
+  const hasOverEarly = boatsInStart.some((rb) => rb.status === "over-early");
+  const allAccountedFor = boatsInStart.length > 0 && boatsInStart.every(
     (rb) => rb.status === "racing" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ"
   );
   const phase: "countdown" | "starting" | "racing" = hasStarted
-    ? (allRacing ? "racing" : "starting")
+    ? ((allAccountedFor && !hasOverEarly && ocsComplete) ? "racing" : "starting")
     : "countdown";
 
   // Sequence notifications
@@ -703,11 +758,7 @@ function StartCard({
   }, []);
 
   const handleAllClear = () => {
-    boatsInStart.forEach((rb) => {
-      if (rb.status === "checked-in" || rb.status === "signed-up") {
-        onUpdateBoatStatus(rb.boatId, "racing");
-      }
-    });
+    setOcsComplete(true);
   };
 
   return (
@@ -773,17 +824,22 @@ function StartCard({
               />
               <div className="start-classes-label">Classes:</div>
               <div className="edit-class-picks">
-                {allClasses.map((cls) => (
-                  <button
-                    key={cls}
-                    className={`edit-class-chip ${editClasses.includes(cls) ? "edit-class-chip--active" : ""}`}
-                    onClick={() => setEditClasses((prev) =>
-                      prev.includes(cls) ? prev.filter((c) => c !== cls) : [...prev, cls]
-                    )}
-                  >
-                    {cls}
-                  </button>
-                ))}
+                {allClasses.map((cls) => {
+                  const inThisStart = editClasses.includes(cls);
+                  const takenByOther = otherStartClasses.has(cls) && !start.classes.includes(cls);
+                  return (
+                    <button
+                      key={cls}
+                      className={`edit-class-chip ${inThisStart ? "edit-class-chip--active" : ""} ${takenByOther ? "edit-class-chip--disabled" : ""}`}
+                      disabled={takenByOther}
+                      onClick={() => setEditClasses((prev) =>
+                        prev.includes(cls) ? prev.filter((c) => c !== cls) : [...prev, cls]
+                      )}
+                    >
+                      {cls}
+                    </button>
+                  );
+                })}
               </div>
               {allClasses.length === 0 && (
                 <p className="races-empty">No classes — add boats with classes in the Series tab</p>
@@ -828,6 +884,7 @@ function StartCard({
               startClasses={start.classes}
               onUpdateStatus={onUpdateBoatStatus}
               onAllClear={handleAllClear}
+              onBulkStatus={onBulkStatus}
             />
           )}
 
@@ -964,7 +1021,6 @@ export default function StartTab() {
   const allClasses = Array.from(new Set(raceBoats.map((b) => b.class)));
   // Classes not yet assigned to a start
   const assignedClasses = new Set(starts.flatMap((s) => s.classes));
-  const unassignedClasses = allClasses.filter((c) => !assignedClasses.has(c));
 
   const updateStarts = (newStarts: StartInfo[]) => {
     // Sort by start time
@@ -1043,7 +1099,11 @@ export default function StartTab() {
         />
       )}
 
-      {starts.map((start, i) => (
+      {starts.map((start, i) => {
+        const otherStartClasses = new Set(
+          starts.filter((s) => s.id !== start.id).flatMap((s) => s.classes)
+        );
+        return (
         <StartCard
           key={start.id}
           start={start}
@@ -1051,11 +1111,23 @@ export default function StartTab() {
           raceBoats={raceBoats}
           allBoats={boats}
           allClasses={allClasses}
+          otherStartClasses={otherStartClasses}
           onUpdateStart={updateStart}
           onUpdateBoatStatus={updateBoatStatus}
+          onBulkStatus={(updates) => {
+            const updateMap = new Map(updates.map((u) => [u.boatId, u.status]));
+            const updatedBoats = raceBoats.map((b) =>
+              updateMap.has(b.boatId) ? { ...b, status: updateMap.get(b.boatId)! } : b
+            );
+            updateRaceData(selectedRace.id, selectedRace.name, {
+              ...raceInfo,
+              boats: updatedBoats,
+            });
+          }}
           onRecall={handleRecall}
         />
-      ))}
+        );
+      })}
 
       {starts.length === 0 && !creatingStart && (
         <div className="races-empty-state">
@@ -1066,7 +1138,8 @@ export default function StartTab() {
       {creatingStart ? (
         <CreateStartForm
           existingStarts={starts}
-          availableClasses={unassignedClasses.length > 0 ? unassignedClasses : allClasses}
+          allClasses={allClasses}
+          takenClasses={assignedClasses}
           onSave={addStart}
           onCancel={() => setCreatingStart(false)}
         />

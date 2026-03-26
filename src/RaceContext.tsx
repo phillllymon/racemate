@@ -79,6 +79,14 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   const pendingUpdates = useRef<Map<string, () => Promise<unknown>>>(new Map());
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Pending boats: temp ID boats waiting for server confirmation
+  const pendingBoatsRef = useRef<Map<number, {
+    name: string;
+    info: BoatInfo;
+    raceIds: number[];
+  }>>(new Map());
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const auth = user && token ? { userId: user.id, token } : null;
 
   // Flush pending updates to backend
@@ -102,7 +110,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    if (pendingUpdates.current.size === 0) {
+    if (pendingUpdates.current.size === 0 && pendingBoatsRef.current.size === 0) {
       setSynced(true);
     } else {
       scheduleFlush();
@@ -147,6 +155,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return () => {
       if (syncTimer.current) clearTimeout(syncTimer.current);
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   }, []);
 
@@ -200,12 +209,107 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     return created;
   };
 
+  const generateTempId = (): number => {
+    // Large negative number to avoid collision with real DB IDs
+    return -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
+  };
+
+  const swapBoatId = useCallback((tempId: number, realId: number) => {
+    // 1. Swap in boats array
+    setBoats((prev) =>
+      prev.map((b) => (b.id === tempId ? { ...b, id: realId } : b))
+    );
+
+    // 2. Swap in tracked races only
+    const pending = pendingBoatsRef.current.get(tempId);
+    if (pending) {
+      setRaces((prevRaces) =>
+        prevRaces.map((race) => {
+          if (!pending.raceIds.includes(race.id)) return race;
+          const updatedBoats = (race.info.boats || []).map((rb) =>
+            rb.boatId === tempId ? { ...rb, boatId: realId } : rb
+          );
+          const updatedRace = { ...race, info: { ...race.info, boats: updatedBoats } };
+          // Queue the race update to sync the swapped ID to backend
+          if (auth) {
+            queueUpdate(`race-${race.id}`, () => updateRace(auth, race.id, race.name, updatedRace.info));
+          }
+          return updatedRace;
+        })
+      );
+      pendingBoatsRef.current.delete(tempId);
+    }
+  }, [auth, queueUpdate]);
+
+  const retryPendingBoats = useCallback(async () => {
+    if (!auth || pendingBoatsRef.current.size === 0) return;
+
+    const entries = Array.from(pendingBoatsRef.current.entries());
+    for (const [tempId, { name, info }] of entries) {
+      try {
+        const res = await addBoat(auth, name, info);
+        const created = parseRecord<BoatInfo>(res.boat[0]);
+        swapBoatId(tempId, created.id);
+      } catch {
+        // Still offline, will retry next cycle
+      }
+    }
+
+    // Schedule another retry if there are still pending boats
+    if (pendingBoatsRef.current.size > 0) {
+      retryTimerRef.current = setTimeout(retryPendingBoats, 10000);
+    } else {
+      setSynced(pendingUpdates.current.size === 0);
+    }
+  }, [auth, swapBoatId]);
+
+  // Track which race a temp boat gets added to
+  const trackTempBoatInRace = useCallback((tempId: number, raceId: number) => {
+    const entry = pendingBoatsRef.current.get(tempId);
+    if (entry && !entry.raceIds.includes(raceId)) {
+      entry.raceIds.push(raceId);
+    }
+  }, []);
+
+  const CREATE_TIMEOUT_MS = 5000;
+
   const createBoat = async (name: string, info: BoatInfo): Promise<Boat> => {
-    if (!auth) throw new Error("Not authenticated");
-    const res = await addBoat(auth, name, info);
-    const created = parseRecord<BoatInfo>(res.boat[0]);
-    setBoats((prev) => [...prev, created]);
-    return created;
+    if (!auth) {
+      // No auth — create temp boat only
+      const tempId = generateTempId();
+      const tempBoat: Boat = { id: tempId, name, info };
+      setBoats((prev) => [...prev, tempBoat]);
+      pendingBoatsRef.current.set(tempId, { name, info, raceIds: [] });
+      setSynced(false);
+      return tempBoat;
+    }
+
+    // Try to create with timeout
+    try {
+      const result = await Promise.race([
+        addBoat(auth, name, info),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), CREATE_TIMEOUT_MS)
+        ),
+      ]);
+      const created = parseRecord<BoatInfo>(result.boat[0]);
+      setBoats((prev) => [...prev, created]);
+      return created;
+    } catch {
+      // Failed or timed out — use temp ID
+      const tempId = generateTempId();
+      const tempBoat: Boat = { id: tempId, name, info };
+      setBoats((prev) => [...prev, tempBoat]);
+      pendingBoatsRef.current.set(tempId, { name, info, raceIds: [] });
+      setSynced(false);
+
+      // Start retry cycle if not already running
+      if (!retryTimerRef.current) {
+        retryTimerRef.current = setTimeout(retryPendingBoats, 10000);
+      }
+
+      return tempBoat;
+    }
   };
 
   const updateBoatData = (boatId: number, name: string, info: BoatInfo) => {
@@ -218,10 +322,20 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   };
 
   const updateRaceData = (raceId: number, name: string, info: RaceInfo) => {
+    // Track any temp boat IDs being added to this race
+    const raceBoats = info.boats || [];
+    for (const rb of raceBoats) {
+      if (rb.boatId < 0 && pendingBoatsRef.current.has(rb.boatId)) {
+        trackTempBoatInRace(rb.boatId, raceId);
+      }
+    }
+
     setRaces((prev) =>
       prev.map((r) => (r.id === raceId ? { ...r, name, info } : r))
     );
-    if (auth) {
+    // Only sync races that have no temp boat IDs
+    const hasTempBoats = raceBoats.some((rb) => rb.boatId < 0);
+    if (auth && !hasTempBoats) {
       queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, name, info));
     }
   };

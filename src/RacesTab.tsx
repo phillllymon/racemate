@@ -3,6 +3,7 @@ import { useRaces } from "./RaceContext";
 import { useTime } from "./TimeContext";
 import type { Race, Series, Boat } from "./RaceContext";
 import type { BoatInfo, RaceBoatEntry, RaceInfo } from "./api";
+import SpreadsheetImport from "./SpreadsheetImport";
 
 // ---- Edit boat overlay ----
 
@@ -65,6 +66,8 @@ function EditBoatForm({
     onDone();
   };
 
+  const [editRatingsOpen, setEditRatingsOpen] = useState(false);
+
   return (
     <div className="races-form">
       <div className="edit-boat-title">Edit: {boat.name}</div>
@@ -72,9 +75,22 @@ function EditBoatForm({
       <input className="login-input" placeholder="Sail number" value={sailNumber} onChange={(e) => setSailNumber(e.target.value)} />
       <input className="login-input" placeholder="Skipper" value={skipper} onChange={(e) => setSkipper(e.target.value)} />
       <input className="login-input" placeholder="Boat type" value={boatType} onChange={(e) => setBoatType(e.target.value)} />
-      <input className="login-input" placeholder="PHRF rating" value={phrf} onChange={(e) => setPhrf(e.target.value)} inputMode="numeric" />
-      <input className="login-input" placeholder="Portsmouth number" value={pn} onChange={(e) => setPn(e.target.value)} inputMode="numeric" />
-      <input className="login-input" placeholder="IRC TCC" value={ircTcc} onChange={(e) => setIrcTcc(e.target.value)} inputMode="decimal" />
+
+      <button className="ratings-toggle" onClick={() => setEditRatingsOpen(!editRatingsOpen)}>
+        <span className="ratings-toggle-label">Ratings</span>
+        <span className={`race-card-chevron ${editRatingsOpen ? "race-card-chevron--open" : ""}`}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
+        </span>
+      </button>
+      {editRatingsOpen && (
+        <div className="ratings-fields">
+          <input className="login-input" placeholder="PHRF rating" value={phrf} onChange={(e) => setPhrf(e.target.value)} inputMode="numeric" />
+          <input className="login-input" placeholder="Portsmouth number" value={pn} onChange={(e) => setPn(e.target.value)} inputMode="numeric" />
+          <input className="login-input" placeholder="IRC TCC" value={ircTcc} onChange={(e) => setIrcTcc(e.target.value)} inputMode="decimal" />
+        </div>
+      )}
 
       <div className="edit-class-section">
         <div className="start-classes-label">Move to class:</div>
@@ -299,8 +315,11 @@ function AddBoatForm({
   const [sailNumber, setSailNumber] = useState("");
   const [boatType, setBoatType] = useState("");
   const [phrf, setPhrf] = useState("");
+  const [pn, setPn] = useState("");
+  const [ircTcc, setIrcTcc] = useState("");
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [ratingsOpen, setRatingsOpen] = useState(false);
 
   const existingBoatIds = (race.info.boats || []).map((b) => b.boatId);
 
@@ -336,7 +355,9 @@ function AddBoatForm({
     const info: BoatInfo = { name: name.trim() };
     if (sailNumber.trim()) info.sailNumber = sailNumber.trim();
     if (boatType.trim()) info.type = boatType.trim();
-    if (phrf.trim()) info.phrf = Number(phrf);
+    if (phrf.trim() && !isNaN(Number(phrf))) info.phrf = Number(phrf);
+    if (pn.trim() && !isNaN(Number(pn))) info.portsmouthNumber = Number(pn);
+    if (ircTcc.trim() && !isNaN(Number(ircTcc))) info.ircTcc = Number(ircTcc);
 
     const boat = await createBoat(name.trim(), info);
     addBoatToRace(boat.id);
@@ -345,6 +366,8 @@ function AddBoatForm({
     setSailNumber("");
     setBoatType("");
     setPhrf("");
+    setPn("");
+    setIrcTcc("");
     setBusy(false);
     onDone();
   };
@@ -409,7 +432,23 @@ function AddBoatForm({
       <input className="login-input" placeholder="Boat name *" value={name} onChange={(e) => setName(e.target.value)} />
       <input className="login-input" placeholder="Sail number" value={sailNumber} onChange={(e) => setSailNumber(e.target.value)} />
       <input className="login-input" placeholder="Boat type" value={boatType} onChange={(e) => setBoatType(e.target.value)} />
-      <input className="login-input" placeholder="PHRF rating" value={phrf} onChange={(e) => setPhrf(e.target.value)} inputMode="numeric" />
+
+      <button className="ratings-toggle" onClick={() => setRatingsOpen(!ratingsOpen)}>
+        <span className="ratings-toggle-label">Ratings</span>
+        <span className={`race-card-chevron ${ratingsOpen ? "race-card-chevron--open" : ""}`}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
+        </span>
+      </button>
+      {ratingsOpen && (
+        <div className="ratings-fields">
+          <input className="login-input" placeholder="PHRF rating" value={phrf} onChange={(e) => setPhrf(e.target.value)} inputMode="numeric" />
+          <input className="login-input" placeholder="Portsmouth number" value={pn} onChange={(e) => setPn(e.target.value)} inputMode="numeric" />
+          <input className="login-input" placeholder="IRC TCC" value={ircTcc} onChange={(e) => setIrcTcc(e.target.value)} inputMode="decimal" />
+        </div>
+      )}
+
       <div className="races-form-actions">
         <button className="btn btn-primary" onClick={submitNew} disabled={busy || !name.trim()}>
           {busy ? "..." : "Add Boat"}
@@ -542,6 +581,7 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   const [addingClass, setAddingClass] = useState(false);
   const [newClassName, setNewClassName] = useState("");
   const [emptyClasses, setEmptyClasses] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
   const [editName, setEditName] = useState(race.name);
   const [editAutoCheckIn, setEditAutoCheckIn] = useState(race.info.autoCheckIn ?? true);
   const [editWind, setEditWind] = useState<string>((race.info.windCondition as string) || "medium");
@@ -743,6 +783,15 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
               ) : (
                 <button className="btn btn-secondary" onClick={() => setAddingClass(true)}>
                   + Add Class
+                </button>
+              )}
+
+              {/* Import from spreadsheet */}
+              {importing ? (
+                <SpreadsheetImport race={race} onDone={() => setImporting(false)} />
+              ) : (
+                <button className="btn btn-secondary" onClick={() => setImporting(true)}>
+                  Import Spreadsheet
                 </button>
               )}
             </>
