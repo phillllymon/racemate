@@ -32,6 +32,7 @@ function SearchResults({
   boats,
   raceBoats,
   stagedIds,
+  hideFinished,
   onStage,
   onAdjustFinish,
   onUnfinish,
@@ -40,6 +41,7 @@ function SearchResults({
   boats: Boat[];
   raceBoats: RaceBoatEntry[];
   stagedIds: Set<number>;
+  hideFinished: boolean;
   onStage: (boatId: number) => void;
   onAdjustFinish: (boatId: number, delta: number) => void;
   onUnfinish: (boatId: number) => void;
@@ -48,6 +50,7 @@ function SearchResults({
 
   const q = query.trim().toLowerCase();
   const results = raceBoats.filter((rb) => {
+    if (hideFinished && rb.finishTime != null) return false;
     if (!q) return true;
     const boat = boats.find((b) => b.id === rb.boatId);
     if (!boat) return false;
@@ -321,6 +324,7 @@ export default function FinishTab() {
   const { selectedRace, updateRaceData, boats } = useRaces();
   const { now } = useTime();
   const [search, setSearch] = useState("");
+  const [hideFinished, setHideFinished] = useState(false);
   const [staged, setStaged] = useState<StagedBoat[]>([]);
   const [stagingOpen, setStagingOpen] = useState(true);
 
@@ -527,6 +531,7 @@ export default function FinishTab() {
         boats={boats}
         raceBoats={raceBoats}
         stagedIds={stagedBoatIds}
+        hideFinished={hideFinished}
         onStage={stageBoat}
         onAdjustFinish={(boatId, delta) => {
           const rb = raceBoats.find((b) => b.boatId === boatId);
@@ -538,6 +543,21 @@ export default function FinishTab() {
           saveFinishTime(boatId, null);
         }}
       />
+
+      {/* Fixed bottom bar */}
+      <div className="finish-bottom-bar">
+        <span className="finish-racing-count">
+          {raceBoats.filter((rb) => rb.status === "racing" && rb.finishTime == null).length} still racing
+        </span>
+        <label className="finish-hide-toggle">
+          <input
+            type="checkbox"
+            checked={hideFinished}
+            onChange={(e) => setHideFinished(e.target.checked)}
+          />
+          <span>Hide finished</span>
+        </label>
+      </div>
     </div>
   );
 }

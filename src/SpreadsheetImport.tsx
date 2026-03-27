@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useRaces } from "./RaceContext";
-import type { Race, Boat } from "./RaceContext";
+import type { Race } from "./RaceContext";
 import type { BoatInfo, RaceBoatEntry } from "./api";
 import * as XLSX from "xlsx";
 
@@ -134,63 +134,52 @@ export default function SpreadsheetImport({
 
   const doImport = async () => {
     setBusy(true);
-    // Get fresh race data
+
     const currentRace = races.find((r) => r.id === race.id) || race;
-    const existingBoats = currentRace.info.boats || [];
-    const existingBoatIds = existingBoats.map((b) => b.boatId);
-    let newBoatEntries: RaceBoatEntry[] = [...existingBoats];
+    const existingEntries = currentRace.info.boats || [];
+    const newEntries: RaceBoatEntry[] = [...existingEntries];
+    const alreadyInRace = new Set(existingEntries.map((b) => b.boatId));
     let added = 0;
 
+    // Create every boat from the spreadsheet — no duplicate matching
     for (const row of previewRows) {
-      // Try to match existing boat by name or sail number
-      let existingBoat: Boat | undefined;
-      if (row.sailNumber) {
-        existingBoat = boats.find((b) =>
-          b.info.sailNumber?.toLowerCase() === row.sailNumber.toLowerCase()
-        );
+      const info: BoatInfo = { name: row.name };
+      if (row.sailNumber) info.sailNumber = row.sailNumber;
+      if (row.type) info.type = row.type;
+      if (row.skipper) info.skipper = row.skipper;
+      if (row.phrf && !isNaN(Number(row.phrf))) info.phrf = Number(row.phrf);
+      if (row.portsmouthNumber && !isNaN(Number(row.portsmouthNumber))) info.portsmouthNumber = Number(row.portsmouthNumber);
+      if (row.ircTcc && !isNaN(Number(row.ircTcc))) info.ircTcc = Number(row.ircTcc);
+
+      const newBoat = await createBoat(row.name, info);
+
+      if (!alreadyInRace.has(newBoat.id)) {
+        newEntries.push({
+          boatId: newBoat.id,
+          class: row.class,
+          status: currentRace.info.autoCheckIn ? "checked-in" : "signed-up",
+        });
+        alreadyInRace.add(newBoat.id);
+        added++;
       }
-      if (!existingBoat) {
-        existingBoat = boats.find((b) =>
-          b.name.toLowerCase() === row.name.toLowerCase()
-        );
-      }
-
-      let boatId: number;
-
-      if (existingBoat && existingBoatIds.includes(existingBoat.id)) {
-        // Already in this race — skip
-        continue;
-      } else if (existingBoat) {
-        // Exists in database but not in this race
-        boatId = existingBoat.id;
-      } else {
-        // Create new boat
-        const info: BoatInfo = { name: row.name };
-        if (row.sailNumber) info.sailNumber = row.sailNumber;
-        if (row.type) info.type = row.type;
-        if (row.skipper) info.skipper = row.skipper;
-        if (row.phrf && !isNaN(Number(row.phrf))) info.phrf = Number(row.phrf);
-        if (row.portsmouthNumber && !isNaN(Number(row.portsmouthNumber))) info.portsmouthNumber = Number(row.portsmouthNumber);
-        if (row.ircTcc && !isNaN(Number(row.ircTcc))) info.ircTcc = Number(row.ircTcc);
-
-        const newBoat = await createBoat(row.name, info);
-        boatId = newBoat.id;
-      }
-
-      const entry: RaceBoatEntry = {
-        boatId,
-        class: row.class,
-        status: currentRace.info.autoCheckIn ? "checked-in" : "signed-up",
-      };
-      newBoatEntries.push(entry);
-      existingBoatIds.push(boatId);
-      added++;
     }
 
-    // Update race with all new boats
-    updateRaceData(currentRace.id, currentRace.name, {
-      ...currentRace.info,
-      boats: newBoatEntries,
+    // Re-read fresh race state in case createBoat modified it via temp IDs
+    const freshRace = races.find((r) => r.id === race.id) || currentRace;
+    const freshEntries = freshRace.info.boats || [];
+    const freshIds = new Set(freshEntries.map((b) => b.boatId));
+
+    const mergedEntries = [...freshEntries];
+    for (const entry of newEntries) {
+      if (!freshIds.has(entry.boatId)) {
+        mergedEntries.push(entry);
+        freshIds.add(entry.boatId);
+      }
+    }
+
+    updateRaceData(freshRace.id, freshRace.name, {
+      ...freshRace.info,
+      boats: mergedEntries,
     });
 
     setImportCount(added);

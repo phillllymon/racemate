@@ -5,6 +5,72 @@ import type { Race, Series, Boat } from "./RaceContext";
 import type { BoatInfo, RaceBoatEntry, RaceInfo } from "./api";
 import SpreadsheetImport from "./SpreadsheetImport";
 
+// ---- Custom fields editor (key/value pairs) ----
+
+function CustomFieldsEditor({
+  fields,
+  onChange,
+}: {
+  fields: Array<{ key: string; value: string }>;
+  onChange: (fields: Array<{ key: string; value: string }>) => void;
+}) {
+  const [open, setOpen] = useState(fields.length > 0);
+
+  const updateField = (index: number, prop: "key" | "value", val: string) => {
+    const updated = fields.map((f, i) => (i === index ? { ...f, [prop]: val } : f));
+    onChange(updated);
+  };
+
+  const removeField = (index: number) => {
+    onChange(fields.filter((_, i) => i !== index));
+  };
+
+  const addField = () => {
+    onChange([...fields, { key: "", value: "" }]);
+  };
+
+  return (
+    <>
+      <button className="ratings-toggle" onClick={() => setOpen(!open)}>
+        <span className="ratings-toggle-label">
+          Additional Info{fields.length > 0 ? ` (${fields.length})` : ""}
+        </span>
+        <span className={`race-card-chevron ${open ? "race-card-chevron--open" : ""}`}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
+        </span>
+      </button>
+      {open && (
+        <div className="ratings-fields">
+          {fields.map((f, i) => (
+            <div key={i} className="custom-field-row">
+              <input
+                className="login-input custom-field-key"
+                placeholder="Field name"
+                value={f.key}
+                onChange={(e) => updateField(i, "key", e.target.value)}
+              />
+              <input
+                className="login-input custom-field-value"
+                placeholder="Value"
+                value={f.value}
+                onChange={(e) => updateField(i, "value", e.target.value)}
+              />
+              <button className="custom-field-remove" onClick={() => removeField(i)} aria-label="Remove">
+                ×
+              </button>
+            </div>
+          ))}
+          <button className="btn btn-secondary btn-sm" onClick={addField}>
+            + Add Field
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ---- Edit boat overlay ----
 
 function EditBoatForm({
@@ -29,6 +95,13 @@ function EditBoatForm({
   const [pn, setPn] = useState(boat.info.portsmouthNumber != null ? String(boat.info.portsmouthNumber) : "");
   const [ircTcc, setIrcTcc] = useState(boat.info.ircTcc != null ? String(boat.info.ircTcc) : "");
   const [boatClass, setBoatClass] = useState(raceEntry.class || "");
+
+  // Extract custom fields (anything not a known core field)
+  const coreKeys = new Set(["name", "sailNumber", "type", "skipper", "phrf", "portsmouthNumber", "ircTcc", "class"]);
+  const initialCustom = Object.entries(boat.info)
+    .filter(([k]) => !coreKeys.has(k))
+    .map(([key, value]) => ({ key, value: String(value ?? "") }));
+  const [customFields, setCustomFields] = useState<Array<{ key: string; value: string }>>(initialCustom);
 
   const existingClasses = Array.from(
     new Set((race.info.boats || []).map((b) => b.class).filter(Boolean))
@@ -59,6 +132,15 @@ function EditBoatForm({
     else delete updatedInfo.portsmouthNumber;
     if (ircTcc.trim() && !isNaN(Number(ircTcc))) updatedInfo.ircTcc = Number(ircTcc);
     else delete updatedInfo.ircTcc;
+    // Remove old custom fields and add current ones
+    for (const k of Object.keys(updatedInfo)) {
+      if (!coreKeys.has(k)) delete updatedInfo[k];
+    }
+    for (const cf of customFields) {
+      if (cf.key.trim() && cf.value.trim()) {
+        updatedInfo[cf.key.trim()] = cf.value.trim();
+      }
+    }
     // Don't store class on the boat record itself
     delete updatedInfo.class;
 
@@ -91,6 +173,8 @@ function EditBoatForm({
           <input className="login-input" placeholder="IRC TCC" value={ircTcc} onChange={(e) => setIrcTcc(e.target.value)} inputMode="decimal" />
         </div>
       )}
+
+      <CustomFieldsEditor fields={customFields} onChange={setCustomFields} />
 
       <div className="edit-class-section">
         <div className="start-classes-label">Move to class:</div>
@@ -314,12 +398,14 @@ function AddBoatForm({
   const [name, setName] = useState("");
   const [sailNumber, setSailNumber] = useState("");
   const [boatType, setBoatType] = useState("");
+  const [skipper, setSkipper] = useState("");
   const [phrf, setPhrf] = useState("");
   const [pn, setPn] = useState("");
   const [ircTcc, setIrcTcc] = useState("");
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [ratingsOpen, setRatingsOpen] = useState(false);
+  const [customFields, setCustomFields] = useState<Array<{ key: string; value: string }>>([]);
 
   const existingBoatIds = (race.info.boats || []).map((b) => b.boatId);
 
@@ -355,9 +441,15 @@ function AddBoatForm({
     const info: BoatInfo = { name: name.trim() };
     if (sailNumber.trim()) info.sailNumber = sailNumber.trim();
     if (boatType.trim()) info.type = boatType.trim();
+    if (skipper.trim()) info.skipper = skipper.trim();
     if (phrf.trim() && !isNaN(Number(phrf))) info.phrf = Number(phrf);
     if (pn.trim() && !isNaN(Number(pn))) info.portsmouthNumber = Number(pn);
     if (ircTcc.trim() && !isNaN(Number(ircTcc))) info.ircTcc = Number(ircTcc);
+    for (const cf of customFields) {
+      if (cf.key.trim() && cf.value.trim()) {
+        info[cf.key.trim()] = cf.value.trim();
+      }
+    }
 
     const boat = await createBoat(name.trim(), info);
     addBoatToRace(boat.id);
@@ -365,9 +457,11 @@ function AddBoatForm({
     setName("");
     setSailNumber("");
     setBoatType("");
+    setSkipper("");
     setPhrf("");
     setPn("");
     setIrcTcc("");
+    setCustomFields([]);
     setBusy(false);
     onDone();
   };
@@ -431,6 +525,7 @@ function AddBoatForm({
     <div className="races-form">
       <input className="login-input" placeholder="Boat name *" value={name} onChange={(e) => setName(e.target.value)} />
       <input className="login-input" placeholder="Sail number" value={sailNumber} onChange={(e) => setSailNumber(e.target.value)} />
+      <input className="login-input" placeholder="Skipper" value={skipper} onChange={(e) => setSkipper(e.target.value)} />
       <input className="login-input" placeholder="Boat type" value={boatType} onChange={(e) => setBoatType(e.target.value)} />
 
       <button className="ratings-toggle" onClick={() => setRatingsOpen(!ratingsOpen)}>
@@ -448,6 +543,8 @@ function AddBoatForm({
           <input className="login-input" placeholder="IRC TCC" value={ircTcc} onChange={(e) => setIrcTcc(e.target.value)} inputMode="decimal" />
         </div>
       )}
+
+      <CustomFieldsEditor fields={customFields} onChange={setCustomFields} />
 
       <div className="races-form-actions">
         <button className="btn btn-primary" onClick={submitNew} disabled={busy || !name.trim()}>

@@ -180,6 +180,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     const res = await addRace(auth, name, raceInfo);
     const created = parseRecord<RaceInfo>(res.race[0]);
     setRaces((prev) => [...prev, created]);
+    setSelectedRaceId(created.id);
 
     // If creating inside a series, add raceId to the series
     if (seriesId !== null) {

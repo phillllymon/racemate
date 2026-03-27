@@ -1,7 +1,108 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
+import type { ReactNode } from "react";
 import { useRaces } from "./RaceContext";
 import type { Race, Boat } from "./RaceContext";
 import type { RaceBoatEntry, StartInfo } from "./api";
+
+// ---- Resizable split panel ----
+
+function ResizableSplit({ left, right }: { left: ReactNode; right: ReactNode }) {
+  const splitRef = useRef<HTMLDivElement>(null);
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const [fixedWidth, setFixedWidth] = useState<number | null>(null);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+  const syncing = useRef(false);
+
+  const getDefaultWidth = useCallback(() => {
+    if (!splitRef.current) return 160;
+    return Math.floor(splitRef.current.offsetWidth * 0.4);
+  }, []);
+
+  const onDragStart = useCallback((clientX: number) => {
+    dragging.current = true;
+    startX.current = clientX;
+    startWidth.current = fixedWidth ?? getDefaultWidth();
+    document.body.style.userSelect = "none";
+  }, [fixedWidth, getDefaultWidth]);
+
+  const onDragMove = useCallback((clientX: number) => {
+    if (!dragging.current || !splitRef.current) return;
+    const delta = clientX - startX.current;
+    const totalWidth = splitRef.current.offsetWidth;
+    const newWidth = Math.max(60, Math.min(totalWidth - 80, startWidth.current + delta));
+    setFixedWidth(newWidth);
+  }, []);
+
+  const onDragEnd = useCallback(() => {
+    dragging.current = false;
+    document.body.style.userSelect = "";
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    onDragStart(e.clientX);
+    const onMove = (ev: MouseEvent) => onDragMove(ev.clientX);
+    const onUp = () => { onDragEnd(); window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [onDragStart, onDragMove, onDragEnd]);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    onDragStart(touch.clientX);
+    const onMove = (ev: TouchEvent) => { ev.preventDefault(); onDragMove(ev.touches[0].clientX); };
+    const onUp = () => { onDragEnd(); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onUp);
+  }, [onDragStart, onDragMove, onDragEnd]);
+
+  // Sync vertical scroll between left and right
+  const syncScroll = useCallback((source: "left" | "right") => {
+    if (syncing.current) return;
+    syncing.current = true;
+    const from = source === "left" ? leftRef.current : rightRef.current;
+    const to = source === "left" ? rightRef.current : leftRef.current;
+    if (from && to) to.scrollTop = from.scrollTop;
+    syncing.current = false;
+  }, []);
+
+  const width = fixedWidth ?? getDefaultWidth();
+  const isNarrow = width < 100;
+
+  return (
+    <div className="results-split" ref={splitRef}>
+      <div
+        ref={leftRef}
+        className={`results-fixed ${isNarrow ? "results-fixed--narrow" : ""}`}
+        style={{ width: `${width}px` }}
+        onScroll={() => syncScroll("left")}
+      >
+        <div className="results-table">
+          {left}
+        </div>
+      </div>
+      <div
+        className="results-drag-handle"
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+      >
+        <div className="results-drag-line" />
+      </div>
+      <div
+        ref={rightRef}
+        className="results-scroll"
+        onScroll={() => syncScroll("right")}
+      >
+        <div className="results-table">
+          {right}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ---- Scoring types ----
 
@@ -28,8 +129,10 @@ interface BoatResult {
   boatId: number;
   boatName: string;
   sailNumber: string;
+  skipper: string;
   className: string;
   phrf: number | null;
+  rating: number | string | null;
   elapsedMs: number | null;
   correctedMs: number | null;
   classRank: number | null;
@@ -38,6 +141,7 @@ interface BoatResult {
   lapsCompleted: number;
   totalLaps: number;
   lapTimes: number[];
+  customFields: Record<string, string>;
 }
 
 interface RaceResults {
@@ -50,7 +154,9 @@ interface SeriesBoatResult {
   boatId: number;
   boatName: string;
   sailNumber: string;
+  skipper: string;
   className: string;
+  customFields: Record<string, string>;
   raceResults: Array<{
     raceId: number;
     classRank: number | null;
@@ -183,12 +289,29 @@ function calculateRaceResults(
       correctedMs = adjustedElapsed;
     }
 
+    // Extract custom fields
+    const coreKeys = new Set(["name", "sailNumber", "type", "skipper", "phrf", "portsmouthNumber", "ircTcc", "class"]);
+    const cf: Record<string, string> = {};
+    if (boat) {
+      for (const [k, v] of Object.entries(boat.info)) {
+        if (!coreKeys.has(k) && v != null) cf[k] = String(v);
+      }
+    }
+
+    // Determine the rating value for the current method
+    let rating: number | string | null = null;
+    if (timingMethod === "phrf-tot" || timingMethod === "phrf-tod") rating = phrf;
+    else if (timingMethod === "portsmouth") rating = pn;
+    else if (timingMethod === "irc") rating = boat?.info.ircTcc != null ? Number(boat.info.ircTcc) : null;
+
     return {
       boatId: rb.boatId,
       boatName: boat?.name || `Boat #${rb.boatId}`,
       sailNumber: boat?.info.sailNumber || "",
+      skipper: boat?.info.skipper || "",
       className: rb.class,
       phrf,
+      rating,
       elapsedMs,
       correctedMs,
       classRank: null,
@@ -197,6 +320,7 @@ function calculateRaceResults(
       lapsCompleted,
       totalLaps,
       lapTimes,
+      customFields: cf,
     };
   });
 
@@ -334,7 +458,9 @@ function calculateSeriesResults(
       boatId,
       boatName: boat?.name || firstResult?.boatName || `Boat #${boatId}`,
       sailNumber: boat?.info.sailNumber || firstResult?.sailNumber || "",
+      skipper: boat?.info.skipper || firstResult?.skipper || "",
       className: firstResult?.className || "Default",
+      customFields: firstResult?.customFields || {},
       raceResults,
       totalPoints,
       totalTimeMs,
@@ -386,7 +512,7 @@ function downloadCSV(content: string, filename: string) {
 
 // ---- Column definitions ----
 
-type RaceColId = "elapsed" | "corrected" | "sailNum" | "class" | "phrf" | "status";
+type RaceColId = "elapsed" | "corrected" | "sailNum" | "class" | "skipper" | "rating" | "status";
 
 interface ColDef {
   id: RaceColId;
@@ -394,17 +520,30 @@ interface ColDef {
   defaultOn: boolean;
 }
 
-const RACE_COLUMNS: ColDef[] = [
-  { id: "sailNum", label: "Sail #", defaultOn: false },
-  { id: "class", label: "Class", defaultOn: false },
-  { id: "elapsed", label: "Elapsed", defaultOn: true },
-  { id: "corrected", label: "Corrected", defaultOn: true },
-  { id: "phrf", label: "PHRF", defaultOn: false },
-  { id: "status", label: "Status", defaultOn: false },
-];
+function getRaceColumns(timingMethod: string): ColDef[] {
+  const cols: ColDef[] = [
+    { id: "sailNum", label: "Sail #", defaultOn: false },
+    { id: "class", label: "Class", defaultOn: false },
+    { id: "skipper", label: "Skipper", defaultOn: false },
+    { id: "elapsed", label: "Elapsed", defaultOn: true },
+    { id: "corrected", label: "Corrected", defaultOn: timingMethod !== "absolute" },
+    { id: "status", label: "Status", defaultOn: false },
+  ];
 
-function defaultVisibleCols(): Set<RaceColId> {
-  return new Set(RACE_COLUMNS.filter((c) => c.defaultOn).map((c) => c.id));
+  if (timingMethod === "phrf-tot" || timingMethod === "phrf-tod") {
+    cols.splice(5, 0, { id: "rating", label: "PHRF", defaultOn: false });
+  } else if (timingMethod === "portsmouth") {
+    cols.splice(5, 0, { id: "rating", label: "Portsmouth", defaultOn: false });
+  } else if (timingMethod === "irc") {
+    cols.splice(5, 0, { id: "rating", label: "IRC TCC", defaultOn: false });
+  }
+  // absolute: no rating column
+
+  return cols;
+}
+
+function defaultVisibleCols(timingMethod: string): Set<RaceColId> {
+  return new Set(getRaceColumns(timingMethod).filter((c) => c.defaultOn).map((c) => c.id));
 }
 
 // ---- Column toggle bar ----
@@ -439,11 +578,15 @@ function RaceResultsView({
   results,
   raceName,
   visibleCols,
+  customCols,
+  timingMethod,
   topN,
 }: {
   results: RaceResults;
   raceName: string;
   visibleCols: Set<RaceColId>;
+  customCols: string[];
+  timingMethod: string;
   topN: number;
 }) {
   const sorted = [...results.boats].sort(
@@ -463,51 +606,62 @@ function RaceResultsView({
           Export
         </button>
       </div>
-      <div className="results-split">
-        {/* Fixed left: ranks + boat name */}
-        <div className="results-fixed">
-          <div className="results-row results-row--header">
+      <ResizableSplit
+        left={
+          <>
+          <div className="results-row results-row--header results-row--sticky">
+            <span className="results-cell results-cell--name">Boat</span>
             <span className="results-cell results-cell--rank">#</span>
             <span className="results-cell results-cell--cls-rank">Cls</span>
-            <span className="results-cell results-cell--name">Boat</span>
           </div>
           {sorted.map((r) => {
             const st = statusLabel(r.status);
             return (
               <div key={r.boatId} className={`results-row ${r.overallRank === 1 ? "results-row--first" : ""}`}>
-                <span className="results-cell results-cell--rank">{r.overallRank ?? "—"}</span>
-                <span className="results-cell results-cell--cls-rank">{r.classRank ?? "—"}</span>
                 <span className="results-cell results-cell--name">
                   <span>{r.boatName}</span>
                   {st && <span className="results-status-badge">{st}</span>}
                 </span>
+                <span className="results-cell results-cell--rank">{r.overallRank ?? "—"}</span>
+                <span className="results-cell results-cell--cls-rank">{r.classRank ?? "—"}</span>
               </div>
             );
           })}
-        </div>
-
-        {/* Scrollable right: data columns */}
-        <div className="results-scroll">
-          <div className="results-row results-row--header">
+          </>
+        }
+        right={
+          <>
+          <div className="results-row results-row--header results-row--sticky">
             {show("sailNum") && <span className="results-cell results-cell--data">Sail #</span>}
             {show("class") && <span className="results-cell results-cell--data">Class</span>}
+            {show("skipper") && <span className="results-cell results-cell--data">Skipper</span>}
             {show("elapsed") && <span className="results-cell results-cell--data">Elapsed</span>}
             {show("corrected") && <span className="results-cell results-cell--data">Corrected</span>}
-            {show("phrf") && <span className="results-cell results-cell--data">PHRF</span>}
+            {show("rating") && <span className="results-cell results-cell--data">
+              {timingMethod.startsWith("phrf") ? "PHRF" : timingMethod === "portsmouth" ? "PN" : timingMethod === "irc" ? "TCC" : "Rating"}
+            </span>}
             {show("status") && <span className="results-cell results-cell--data">Status</span>}
+            {customCols.map((col) => (
+              <span key={col} className="results-cell results-cell--data">{col}</span>
+            ))}
           </div>
           {sorted.map((r) => (
             <div key={r.boatId} className={`results-row ${r.overallRank === 1 ? "results-row--first" : ""}`}>
               {show("sailNum") && <span className="results-cell results-cell--data">{r.sailNumber || "—"}</span>}
               {show("class") && <span className="results-cell results-cell--data">{r.className}</span>}
+              {show("skipper") && <span className="results-cell results-cell--data">{r.skipper || "—"}</span>}
               {show("elapsed") && <span className="results-cell results-cell--data results-cell--mono">{formatElapsed(r.elapsedMs)}</span>}
               {show("corrected") && <span className="results-cell results-cell--data results-cell--mono">{formatElapsed(r.correctedMs)}</span>}
-              {show("phrf") && <span className="results-cell results-cell--data">{r.phrf ?? "—"}</span>}
+              {show("rating") && <span className="results-cell results-cell--data">{r.rating ?? "—"}</span>}
               {show("status") && <span className="results-cell results-cell--data">{statusLabel(r.status) || "—"}</span>}
+              {customCols.map((col) => (
+                <span key={col} className="results-cell results-cell--data">{r.customFields[col] || "—"}</span>
+              ))}
             </div>
           ))}
-        </div>
-      </div>
+          </>
+        }
+      />
     </div>
   );
 }
@@ -515,13 +669,15 @@ function RaceResultsView({
 // ---- Series results view ----
 
 function SeriesResultsView({
-  results, races, seriesName, seriesMethod, visibleCols, topN,
+  results, races, seriesName, seriesMethod, visibleCols, customCols, timingMethod, topN,
 }: {
   results: SeriesBoatResult[];
   races: Race[];
   seriesName: string;
   seriesMethod: SeriesMethod;
   visibleCols: Set<RaceColId>;
+  customCols: string[];
+  timingMethod: string;
   topN: number;
 }) {
   const show = (id: RaceColId) => visibleCols.has(id);
@@ -537,34 +693,49 @@ function SeriesResultsView({
           Export
         </button>
       </div>
-      <div className="results-split">
-        {/* Fixed left */}
-        <div className="results-fixed">
-          <div className="results-row results-row--header">
+      <ResizableSplit
+        left={
+          <>
+          <div className="results-row results-row--header results-row--sticky">
+            <span className="results-cell results-cell--name">Boat</span>
             <span className="results-cell results-cell--rank">#</span>
             <span className="results-cell results-cell--cls-rank">Cls</span>
-            <span className="results-cell results-cell--name">Boat</span>
           </div>
           {results.map((r) => (
             <div key={r.boatId} className={`results-row ${r.seriesOverallRank === 1 ? "results-row--first" : ""}`}>
-              <span className="results-cell results-cell--rank">{r.seriesOverallRank ?? "—"}</span>
-              <span className="results-cell results-cell--cls-rank">{r.seriesClassRank ?? "—"}</span>
               <span className="results-cell results-cell--name">
                 <span>{r.boatName}</span>
               </span>
+              <span className="results-cell results-cell--rank">{r.seriesOverallRank ?? "—"}</span>
+              <span className="results-cell results-cell--cls-rank">{r.seriesClassRank ?? "—"}</span>
             </div>
           ))}
-        </div>
-
-        {/* Scrollable right */}
-        <div className="results-scroll">
-          <div className="results-row results-row--header">
+          </>
+        }
+        right={
+          <>
+          <div className="results-row results-row--header results-row--sticky">
             {show("sailNum") && <span className="results-cell results-cell--data">Sail #</span>}
             {show("class") && <span className="results-cell results-cell--data">Class</span>}
+            {show("skipper") && <span className="results-cell results-cell--data">Skipper</span>}
+            {customCols.map((col) => (
+              <span key={col} className="results-cell results-cell--data">{col}</span>
+            ))}
             <span className="results-cell results-cell--data">Total</span>
-            {races.map((race) => (
-              <span key={race.id} className="results-cell results-cell--data">
-                {race.name.length > 10 ? race.name.slice(0, 10) + "…" : race.name}
+            {races.map((race) => {
+              const label = race.name.length > 10 ? race.name.slice(0, 10) + "…" : race.name;
+              return (
+                <span key={race.id} className="results-cell results-cell--data">{label}</span>
+              );
+            })}
+            {show("elapsed") && races.map((race) => (
+              <span key={`el-${race.id}`} className="results-cell results-cell--data">
+                {(race.name.length > 6 ? race.name.slice(0, 6) + "…" : race.name) + " ET"}
+              </span>
+            ))}
+            {show("corrected") && races.map((race) => (
+              <span key={`ct-${race.id}`} className="results-cell results-cell--data">
+                {(race.name.length > 6 ? race.name.slice(0, 6) + "…" : race.name) + " CT"}
               </span>
             ))}
           </div>
@@ -572,6 +743,10 @@ function SeriesResultsView({
             <div key={r.boatId} className={`results-row ${r.seriesOverallRank === 1 ? "results-row--first" : ""}`}>
               {show("sailNum") && <span className="results-cell results-cell--data">{r.sailNumber || "—"}</span>}
               {show("class") && <span className="results-cell results-cell--data">{r.className}</span>}
+              {show("skipper") && <span className="results-cell results-cell--data">{r.skipper || "—"}</span>}
+              {customCols.map((col) => (
+                <span key={col} className="results-cell results-cell--data">{r.customFields[col] || "—"}</span>
+              ))}
               <span className="results-cell results-cell--data results-cell--mono">
                 {seriesMethod === "points"
                   ? (r.totalPoints != null ? `${r.totalPoints} pts` : "—")
@@ -586,10 +761,21 @@ function SeriesResultsView({
                   {rr.overallRank ?? "—"}
                 </span>
               ))}
+              {show("elapsed") && r.raceResults.map((rr) => (
+                <span key={`el-${rr.raceId}`} className={`results-cell results-cell--data results-cell--mono ${rr.dropped ? "results-cell--dropped" : ""}`}>
+                  {formatElapsed(rr.elapsedMs)}
+                </span>
+              ))}
+              {show("corrected") && r.raceResults.map((rr) => (
+                <span key={`ct-${rr.raceId}`} className={`results-cell results-cell--data results-cell--mono ${rr.dropped ? "results-cell--dropped" : ""}`}>
+                  {formatElapsed(rr.correctedMs)}
+                </span>
+              ))}
             </div>
           ))}
-        </div>
-      </div>
+          </>
+        }
+      />
     </div>
   );
 }
@@ -787,14 +973,16 @@ function exportRaceCSVWithSummary(results: RaceResults, topN: number): string {
   // Full results
   lines.push("");
   lines.push("Full Results");
-  lines.push("Overall Rank,Class Rank,Boat,Sail #,Class,Elapsed,Corrected,Status");
+  lines.push("Overall Rank,Class Rank,Boat,Sail #,Skipper,Class,Rating,Elapsed,Corrected,Status");
   sorted.forEach((r) => {
     lines.push([
       r.overallRank ?? "—",
       r.classRank ?? "—",
       r.boatName,
       r.sailNumber,
+      r.skipper,
       r.className,
+      r.rating ?? "—",
       formatElapsed(r.elapsedMs),
       formatElapsed(r.correctedMs),
       statusLabel(r.status),
@@ -875,7 +1063,9 @@ export default function ResultsTab() {
   const [drops, setDrops] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [classFactors, setClassFactors] = useState<ClassFactor[]>([]);
-  const [visibleCols, setVisibleCols] = useState<Set<RaceColId>>(defaultVisibleCols);
+  const [visibleCols, setVisibleCols] = useState<Set<RaceColId>>(() => defaultVisibleCols("phrf-tot"));
+  const [customCols, setCustomCols] = useState<string[]>([]);
+  const [newCustomCol, setNewCustomCol] = useState("");
   const [topN, setTopN] = useState(3);
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [windPerRaceOpen, setWindPerRaceOpen] = useState(false);
@@ -1409,14 +1599,53 @@ export default function ResultsTab() {
 
       {/* Column toggles */}
       <ColumnToggles
-        columns={RACE_COLUMNS}
+        columns={getRaceColumns(timingMethod)}
         visible={visibleCols}
         onToggle={toggleCol}
       />
 
+      {/* Custom columns */}
+      <div className="custom-cols-section">
+        {customCols.map((col) => (
+          <button
+            key={col}
+            className="results-col-toggle results-col-toggle--on"
+            onClick={() => setCustomCols((prev) => prev.filter((c) => c !== col))}
+          >
+            {col} ×
+          </button>
+        ))}
+        <div className="custom-col-add">
+          <input
+            className="login-input custom-col-input"
+            placeholder="Custom column name..."
+            value={newCustomCol}
+            onChange={(e) => setNewCustomCol(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newCustomCol.trim()) {
+                const name = newCustomCol.trim();
+                if (!customCols.includes(name)) setCustomCols((prev) => [...prev, name]);
+                setNewCustomCol("");
+              }
+            }}
+          />
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={!newCustomCol.trim()}
+            onClick={() => {
+              const name = newCustomCol.trim();
+              if (name && !customCols.includes(name)) setCustomCols((prev) => [...prev, name]);
+              setNewCustomCol("");
+            }}
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
       {/* Results display */}
       {viewMode === "race" && (
-        <RaceResultsView results={raceResults} raceName={selectedRace.name} visibleCols={visibleCols} topN={topN} />
+        <RaceResultsView results={raceResults} raceName={selectedRace.name} visibleCols={visibleCols} customCols={customCols} timingMethod={timingMethod} topN={topN} />
       )}
 
       {viewMode === "series" && seriesResults && parentSeries && (
@@ -1426,6 +1655,8 @@ export default function ResultsTab() {
           seriesName={parentSeries.name}
           seriesMethod={seriesMethod}
           visibleCols={visibleCols}
+          customCols={customCols}
+          timingMethod={timingMethod}
           topN={topN}
         />
       )}
