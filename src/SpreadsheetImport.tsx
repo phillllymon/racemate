@@ -31,7 +31,7 @@ export default function SpreadsheetImport({
   race: Race;
   onDone: () => void;
 }) {
-  const { boats, createBoat, updateRaceData, races } = useRaces();
+  const { createBoat, updateRaceData, races } = useRaces();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<Step>("upload");
