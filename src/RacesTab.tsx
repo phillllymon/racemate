@@ -581,9 +581,31 @@ function ClassSection({
   const laps = classLaps[className] || 1;
 
   const setLaps = (newLaps: number) => {
+    const targetLaps = Math.max(1, newLaps);
+    const updatedClassLaps = { ...classLaps, [className]: targetLaps };
+
+    // Check if any boats in this class have already completed the new required laps
+    const updatedBoats = (race.info.boats || []).map((b) => {
+      if (b.class !== className) return b;
+      const completed = (b.lapsCompleted as number) || 0;
+      const lapTimesArr = (b.lapTimes as number[]) || [];
+
+      if (completed >= targetLaps && b.status === "racing") {
+        // Boat has already done enough laps — finish them with their lap time
+        const finishTime = targetLaps <= lapTimesArr.length ? lapTimesArr[targetLaps - 1] : null;
+        return { ...b, finishTime, lapsCompleted: completed, status: finishTime != null ? "finished" : b.status };
+      }
+      if (completed < targetLaps && b.status === "finished" && b.finishTime != null) {
+        // Laps increased and boat was finished — put back to racing if they haven't done enough
+        return { ...b, finishTime: null, status: "racing" };
+      }
+      return b;
+    });
+
     updateRaceData(raceId, race.name, {
       ...race.info,
-      classLaps: { ...classLaps, [className]: Math.max(1, newLaps) },
+      classLaps: updatedClassLaps,
+      boats: updatedBoats,
     });
   };
 

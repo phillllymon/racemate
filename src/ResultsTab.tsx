@@ -111,6 +111,32 @@ type CorrectionMethod = "phrf-tot" | "phrf-tod" | "portsmouth" | "irc";
 type SeriesMethod = "points" | "total-time";
 type WindCondition = "light" | "medium" | "heavy";
 
+interface ClassTimingConfig {
+  mode: TimingMode;
+  method: CorrectionMethod;
+  // PHRF ToT
+  wind?: WindCondition;
+  useFleetAvg?: boolean;
+  // PHRF ToD
+  courseLength?: number; // single race fallback
+  courseLengthByRace?: Record<number, number>; // per-race for series
+  // Portsmouth
+  portsmouthBase?: PortsmouthBase;
+}
+
+// Resolves the effective timing method string for a given class
+function resolveTimingMethod(
+  className: string,
+  globalTimingMethod: string,
+  perClassEnabled: boolean,
+  perClassConfig: Record<string, ClassTimingConfig>
+): string {
+  if (!perClassEnabled) return globalTimingMethod;
+  const config = perClassConfig[className];
+  if (!config) return globalTimingMethod;
+  return config.mode === "absolute" ? "absolute" : config.method;
+}
+
 const PHRF_TOT_CONSTANTS: Record<WindCondition, { a: number; b: number }> = {
   light: { a: 650, b: 490 },
   medium: { a: 650, b: 550 },
@@ -206,7 +232,7 @@ function getFleetAverageAB(raceBoats: RaceBoatEntry[], boats: Boat[], c: number)
 function calcPhrfToD(elapsedMs: number, phrf: number, distanceNm: number): number {
   // CT = ET - (PHRF × Distance) where PHRF is sec/nm and ET is in ms
   const correctionMs = phrf * distanceNm * 1000;
-  return elapsedMs - correctionMs;
+  return Math.max(0, elapsedMs - correctionMs);
 }
 
 type PortsmouthBase = 100 | 1000;
@@ -247,7 +273,9 @@ function calculateRaceResults(
   wind: WindCondition,
   classCourseLengths: Record<string, number>,
   portsmouthBase: PortsmouthBase,
-  useFleetAvg: boolean
+  useFleetAvg: boolean,
+  perClassEnabled: boolean = false,
+  perClassConfig: Record<string, ClassTimingConfig> = {}
 ): RaceResults {
   const raceBoats = race.info.boats || [];
   const starts = race.info.starts || [];
@@ -269,23 +297,34 @@ function calculateRaceResults(
     const factor = classFactors.find((cf) => cf.className === rb.class)?.factor ?? 1;
     const adjustedElapsed = elapsedMs != null ? elapsedMs * factor : null;
 
+    // Resolve timing method and per-class settings for this boat's class
+    const boatTimingMethod = resolveTimingMethod(rb.class, timingMethod, perClassEnabled, perClassConfig);
+    const classConfig = perClassEnabled ? perClassConfig[rb.class] : undefined;
+
     let correctedMs: number | null = null;
-    if (adjustedElapsed != null && timingMethod === "phrf-tot" && phrf != null) {
-      correctedMs = calcPhrfToT(adjustedElapsed, phrf, wind, fleetAB);
-    } else if (adjustedElapsed != null && timingMethod === "phrf-tod" && phrf != null) {
-      const courseNm = classCourseLengths[rb.class] || 0;
+    if (adjustedElapsed != null && boatTimingMethod === "phrf-tot" && phrf != null) {
+      const effectiveWind = classConfig?.wind || wind;
+      const effectiveFleetAB = perClassEnabled
+        ? (classConfig?.useFleetAvg ? getFleetAverageAB(raceBoats, boats, 650) : undefined)
+        : (useFleetAvg ? fleetAB : undefined);
+      correctedMs = calcPhrfToT(adjustedElapsed, phrf, effectiveWind, effectiveFleetAB);
+    } else if (adjustedElapsed != null && boatTimingMethod === "phrf-tod" && phrf != null) {
+      const courseNm = classConfig?.courseLengthByRace?.[race.id] ?? classConfig?.courseLength ?? classCourseLengths[rb.class] ?? 0;
       const totalDistance = courseNm * totalLaps;
       if (totalDistance > 0) {
         correctedMs = calcPhrfToD(adjustedElapsed, phrf, totalDistance);
       }
-    } else if (adjustedElapsed != null && timingMethod === "portsmouth" && pn != null) {
-      correctedMs = calcPortsmouth(adjustedElapsed, pn, portsmouthBase);
-    } else if (adjustedElapsed != null && timingMethod === "irc") {
+    } else if (adjustedElapsed != null && boatTimingMethod === "portsmouth" && pn != null) {
+      const effectiveBase = perClassEnabled
+        ? (classConfig?.portsmouthBase || 1000)
+        : portsmouthBase;
+      correctedMs = calcPortsmouth(adjustedElapsed, pn, effectiveBase);
+    } else if (adjustedElapsed != null && boatTimingMethod === "irc") {
       const tcc = boat?.info.ircTcc != null ? Number(boat.info.ircTcc) : null;
       if (tcc != null) {
         correctedMs = calcIrc(adjustedElapsed, tcc);
       }
-    } else if (adjustedElapsed != null && timingMethod === "absolute") {
+    } else if (adjustedElapsed != null && boatTimingMethod === "absolute") {
       correctedMs = adjustedElapsed;
     }
 
@@ -300,9 +339,9 @@ function calculateRaceResults(
 
     // Determine the rating value for the current method
     let rating: number | string | null = null;
-    if (timingMethod === "phrf-tot" || timingMethod === "phrf-tod") rating = phrf;
-    else if (timingMethod === "portsmouth") rating = pn;
-    else if (timingMethod === "irc") rating = boat?.info.ircTcc != null ? Number(boat.info.ircTcc) : null;
+    if (boatTimingMethod === "phrf-tot" || boatTimingMethod === "phrf-tod") rating = phrf;
+    else if (boatTimingMethod === "portsmouth") rating = pn;
+    else if (boatTimingMethod === "irc") rating = boat?.info.ircTcc != null ? Number(boat.info.ircTcc) : null;
 
     return {
       boatId: rb.boatId,
@@ -367,16 +406,23 @@ function calculateSeriesResults(
   timingMethod: string,
   seriesMethod: SeriesMethod,
   drops: number,
-  classFactors: ClassFactor[],
+  classFactorsByRace: Record<number, ClassFactor[]>,
   raceWindMap: Record<number, WindCondition>,
   allClassCourseLengths: ClassCourseLengths,
   portsmouthBase: PortsmouthBase,
   dnfPenaltyFactor: number,
-  useFleetAvg: boolean
+  useFleetAvg: boolean,
+  perClassEnabled: boolean = false,
+  perClassConfig: Record<string, ClassTimingConfig> = {}
 ): SeriesBoatResult[] {
-  const allRaceResults = seriesRaces.map((race) =>
-    calculateRaceResults(race, boats, timingMethod, classFactors, raceWindMap[race.id] || "medium", allClassCourseLengths[String(race.id)] || {}, portsmouthBase, useFleetAvg)
-  );
+  const allRaceResults = seriesRaces.map((race) => {
+    const raceClasses = Array.from(new Set((race.info.boats || []).map((b) => b.class)));
+    const raceFactors = raceClasses.map((cls) => {
+      const existing = (classFactorsByRace[race.id] || []).find((cf) => cf.className === cls);
+      return existing || { className: cls, factor: 1 };
+    });
+    return calculateRaceResults(race, boats, timingMethod, raceFactors, raceWindMap[race.id] || "medium", allClassCourseLengths[String(race.id)] || {}, portsmouthBase, useFleetAvg, perClassEnabled, perClassConfig);
+  });
 
   const boatIds = new Set<number>();
   allRaceResults.forEach((rr) => rr.boats.forEach((b) => boatIds.add(b.boatId)));
@@ -520,24 +566,25 @@ interface ColDef {
   defaultOn: boolean;
 }
 
-function getRaceColumns(timingMethod: string): ColDef[] {
+function getRaceColumns(timingMethod: string, perClassEnabled: boolean = false): ColDef[] {
   const cols: ColDef[] = [
     { id: "sailNum", label: "Sail #", defaultOn: false },
     { id: "class", label: "Class", defaultOn: false },
     { id: "skipper", label: "Skipper", defaultOn: false },
     { id: "elapsed", label: "Elapsed", defaultOn: true },
-    { id: "corrected", label: "Corrected", defaultOn: timingMethod !== "absolute" },
+    { id: "corrected", label: "Corrected", defaultOn: timingMethod !== "absolute" || perClassEnabled },
     { id: "status", label: "Status", defaultOn: false },
   ];
 
-  if (timingMethod === "phrf-tot" || timingMethod === "phrf-tod") {
+  if (perClassEnabled) {
+    cols.splice(5, 0, { id: "rating", label: "Rating", defaultOn: false });
+  } else if (timingMethod === "phrf-tot" || timingMethod === "phrf-tod") {
     cols.splice(5, 0, { id: "rating", label: "PHRF", defaultOn: false });
   } else if (timingMethod === "portsmouth") {
     cols.splice(5, 0, { id: "rating", label: "Portsmouth", defaultOn: false });
   } else if (timingMethod === "irc") {
     cols.splice(5, 0, { id: "rating", label: "IRC TCC", defaultOn: false });
   }
-  // absolute: no rating column
 
   return cols;
 }
@@ -833,6 +880,69 @@ function IrcWarning({ raceBoats, boats }: { raceBoats: RaceBoatEntry[]; boats: B
   );
 }
 
+function PerClassWarnings({
+  raceBoats,
+  boats,
+  perClassConfig,
+  defaultMethod,
+}: {
+  raceBoats: RaceBoatEntry[];
+  boats: Boat[];
+  perClassConfig: Record<string, ClassTimingConfig>;
+  defaultMethod: string;
+}) {
+  const classes = Array.from(new Set(raceBoats.map((b) => b.class)));
+  const warnings: Array<{ cls: string; count: number; label: string }> = [];
+
+  classes.forEach((cls) => {
+    const config = perClassConfig[cls];
+    const mode = config?.mode || "corrected";
+    if (mode === "absolute") return;
+    const method = config?.method || defaultMethod;
+
+    const classBoats = raceBoats.filter((rb) => rb.class === cls);
+    let missingField: string | null = null;
+    let missingLabel = "";
+
+    if (method === "phrf-tot" || method === "phrf-tod") {
+      missingField = "phrf";
+      missingLabel = "PHRF rating";
+    } else if (method === "portsmouth") {
+      missingField = "portsmouthNumber";
+      missingLabel = "Portsmouth number";
+    } else if (method === "irc") {
+      missingField = "ircTcc";
+      missingLabel = "IRC TCC";
+    }
+
+    if (!missingField) return;
+
+    const missing = classBoats.filter((rb) => {
+      const boat = boats.find((b) => b.id === rb.boatId);
+      return boat?.info[missingField!] == null;
+    });
+
+    if (missing.length > 0) {
+      warnings.push({ cls, count: missing.length, label: missingLabel });
+    }
+  });
+
+  if (warnings.length === 0) return null;
+
+  return (
+    <>
+      {warnings.map((w) => (
+        <div key={w.cls} className="results-warning">
+          <span className="results-warning-icon">⚠</span>
+          <span>
+            {w.count} boat{w.count !== 1 ? "s" : ""} in {w.cls} missing {w.label}.
+          </span>
+        </div>
+      ))}
+    </>
+  );
+}
+
 // ---- Summary views ----
 
 function RaceSummary({ results, topN }: { results: RaceResults; topN: number }) {
@@ -1057,12 +1167,16 @@ export default function ResultsTab() {
   const [viewMode, setViewMode] = useState<"race" | "series">("race");
   const [timingMode, setTimingMode] = useState<TimingMode>("absolute");
   const [correctionMethod, setCorrectionMethod] = useState<CorrectionMethod>("phrf-tot");
+  const [perClassEnabled, setPerClassEnabled] = useState(false);
+  const [perClassConfig, setPerClassConfig] = useState<Record<string, ClassTimingConfig>>({});
+  const [selectedClassForConfig, setSelectedClassForConfig] = useState<string | null>(null);
   const [portsmouthBase, setPortsmouthBase] = useState<PortsmouthBase>(1000);
   const [useFleetAverage, setUseFleetAverage] = useState(false);
   const [seriesMethod, setSeriesMethod] = useState<SeriesMethod>("points");
   const [drops, setDrops] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [classFactors, setClassFactors] = useState<ClassFactor[]>([]);
+  const [classFactorsByRace, setClassFactorsByRace] = useState<Record<number, ClassFactor[]>>({});
+  const [factorsOpen, setFactorsOpen] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Set<RaceColId>>(() => defaultVisibleCols("phrf-tot"));
   const [customCols, setCustomCols] = useState<string[]>([]);
   const [newCustomCol, setNewCustomCol] = useState("");
@@ -1122,19 +1236,25 @@ export default function ResultsTab() {
   const raceBoats = selectedRace.info.boats || [];
   const allClasses = Array.from(new Set(raceBoats.map((b) => b.class)));
 
-  // Ensure classFactors has entries for all classes
-  const effectiveFactors = allClasses.map((cls) => {
-    const existing = classFactors.find((cf) => cf.className === cls);
-    return existing || { className: cls, factor: 1 };
-  });
+  // Get effective factors for a specific race
+  const getEffectiveFactors = (raceId: number, classes: string[]): ClassFactor[] => {
+    const raceFactors = classFactorsByRace[raceId] || [];
+    return classes.map((cls) => {
+      const existing = raceFactors.find((cf) => cf.className === cls);
+      return existing || { className: cls, factor: 1 };
+    });
+  };
 
-  const updateFactor = (cls: string, factor: number) => {
-    setClassFactors((prev) => {
-      const existing = prev.find((cf) => cf.className === cls);
-      if (existing) {
-        return prev.map((cf) => cf.className === cls ? { ...cf, factor } : cf);
-      }
-      return [...prev, { className: cls, factor }];
+  const effectiveFactors = getEffectiveFactors(selectedRace.id, allClasses);
+
+  const updateFactor = (raceId: number, cls: string, factor: number) => {
+    setClassFactorsByRace((prev) => {
+      const raceFactors = prev[raceId] || [];
+      const existing = raceFactors.find((cf) => cf.className === cls);
+      const updated = existing
+        ? raceFactors.map((cf) => cf.className === cls ? { ...cf, factor } : cf)
+        : [...raceFactors, { className: cls, factor }];
+      return { ...prev, [raceId]: updated };
     });
   };
 
@@ -1165,7 +1285,7 @@ export default function ResultsTab() {
     currentRaceCourseLengths[cls] = getClassCourseLength(selectedRace.id, cls);
   });
 
-  const raceResults = calculateRaceResults(selectedRace, boats, timingMethod, effectiveFactors, getWindCondition(selectedRace.id), currentRaceCourseLengths, portsmouthBase, useFleetAverage);
+  const raceResults = calculateRaceResults(selectedRace, boats, timingMethod, effectiveFactors, getWindCondition(selectedRace.id), currentRaceCourseLengths, portsmouthBase, useFleetAverage, perClassEnabled, perClassConfig);
 
   // Build course lengths for all series races
   const allSeriesCourseLengths: ClassCourseLengths = {};
@@ -1179,7 +1299,7 @@ export default function ResultsTab() {
   });
 
   const seriesResults = parentSeries && seriesRaces.length > 1
-    ? calculateSeriesResults(seriesRaces, boats, timingMethod, seriesMethod, drops, effectiveFactors, raceWindConditions, allSeriesCourseLengths, portsmouthBase, dnfPenaltyFactor, useFleetAverage)
+    ? calculateSeriesResults(seriesRaces, boats, timingMethod, seriesMethod, drops, classFactorsByRace, raceWindConditions, allSeriesCourseLengths, portsmouthBase, dnfPenaltyFactor, useFleetAverage, perClassEnabled, perClassConfig)
     : null;
 
   const hasMultipleRaces = parentSeries && seriesRaces.length > 1;
@@ -1218,24 +1338,39 @@ export default function ResultsTab() {
         {settingsOpen && (
           <div className="results-settings-body">
             <div className="results-config-section">
-              <div className="start-classes-label">Timing:</div>
-              <div className="start-mode-toggle">
-                <button
-                  className={`start-mode-btn ${timingMode === "absolute" ? "start-mode-btn--active" : ""}`}
-                  onClick={() => setTimingMode("absolute")}
-                >
-                  Absolute Time
-                </button>
-                <button
-                  className={`start-mode-btn ${timingMode === "corrected" ? "start-mode-btn--active" : ""}`}
-                  onClick={() => setTimingMode("corrected")}
-                >
-                  Corrected Time
-                </button>
+              {!perClassEnabled && (
+                <>
+                  <div className="start-classes-label">Timing:</div>
+                  <div className="start-mode-toggle">
+                    <button
+                      className={`start-mode-btn ${timingMode === "absolute" ? "start-mode-btn--active" : ""}`}
+                      onClick={() => setTimingMode("absolute")}
+                    >
+                      Absolute Time
+                    </button>
+                    <button
+                      className={`start-mode-btn ${timingMode === "corrected" ? "start-mode-btn--active" : ""}`}
+                      onClick={() => setTimingMode("corrected")}
+                    >
+                      Corrected Time
+                    </button>
+                  </div>
+                </>
+              )}
+              <div className="results-config-section">
+                <label className="races-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={perClassEnabled}
+                    onChange={(e) => setPerClassEnabled(e.target.checked)}
+                  />
+                  <span>Different timing per class</span>
+                </label>
               </div>
             </div>
 
-            {timingMode === "corrected" && (
+            {/* Global correction method (when per-class is OFF) */}
+            {timingMode === "corrected" && !perClassEnabled && (
               <>
                 <div className="results-config-section">
                   <div className="start-classes-label">Correction method:</div>
@@ -1271,14 +1406,21 @@ export default function ResultsTab() {
                 {correctionMethod === "phrf-tot" && (
                   <>
                     <div className="results-config-section">
-                      <label className="races-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={useFleetAverage}
-                          onChange={(e) => setUseFleetAverage(e.target.checked)}
-                        />
-                        <span>Use fleet average for B constant</span>
-                      </label>
+                      <div className="start-classes-label">B constant source:</div>
+                      <div className="start-mode-toggle">
+                        <button
+                          className={`start-mode-btn ${!useFleetAverage ? "start-mode-btn--active" : ""}`}
+                          onClick={() => setUseFleetAverage(false)}
+                        >
+                          Wind Conditions
+                        </button>
+                        <button
+                          className={`start-mode-btn ${useFleetAverage ? "start-mode-btn--active" : ""}`}
+                          onClick={() => setUseFleetAverage(true)}
+                        >
+                          Fleet Average
+                        </button>
+                      </div>
                     </div>
 
                     {useFleetAverage ? (
@@ -1460,6 +1602,221 @@ export default function ResultsTab() {
               </>
             )}
 
+            {/* Per-class timing config */}
+            {perClassEnabled && (
+              <div className="results-config-section">
+                <div className="start-classes-label">Class timing:</div>
+                {allClasses.map((cls) => {
+                  const config = perClassConfig[cls] || { mode: "corrected" as TimingMode, method: correctionMethod };
+                  const isExpanded = selectedClassForConfig === cls;
+                  const mode = config.mode || "corrected";
+                  const method = config.method || correctionMethod;
+                  const label = mode === "absolute" ? "Absolute" :
+                    method === "phrf-tot" ? "PHRF ToT" :
+                    method === "phrf-tod" ? "PHRF ToD" :
+                    method === "portsmouth" ? "Portsmouth" :
+                    method === "irc" ? "IRC" : method;
+
+                  const setConfig = (updates: Partial<ClassTimingConfig>) => {
+                    setPerClassConfig((prev) => ({
+                      ...prev,
+                      [cls]: { ...config, ...updates } as ClassTimingConfig,
+                    }));
+                  };
+
+                  return (
+                    <div key={cls} className="per-class-section">
+                      <button
+                        className="per-class-header"
+                        onClick={() => setSelectedClassForConfig(isExpanded ? null : cls)}
+                      >
+                        <span className="per-class-header-name">{cls}</span>
+                        <span className="per-class-method-label">{label}</span>
+                        <span className={`race-card-chevron ${isExpanded ? "race-card-chevron--open" : ""}`}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="9 6 15 12 9 18" />
+                          </svg>
+                        </span>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="per-class-config">
+                          <div className="start-mode-toggle">
+                            <button
+                              className={`start-mode-btn ${mode === "absolute" ? "start-mode-btn--active" : ""}`}
+                              onClick={() => setConfig({ mode: "absolute" })}
+                            >
+                              Absolute
+                            </button>
+                            <button
+                              className={`start-mode-btn ${mode === "corrected" ? "start-mode-btn--active" : ""}`}
+                              onClick={() => setConfig({ mode: "corrected" })}
+                            >
+                              Corrected
+                            </button>
+                          </div>
+
+                          {mode === "corrected" && (
+                            <>
+                              <div className="results-method-select">
+                                <button
+                                  className={`results-method-option ${method === "phrf-tot" ? "results-method-option--active" : ""}`}
+                                  onClick={() => setConfig({ method: "phrf-tot" })}
+                                >
+                                  PHRF Time-on-Time
+                                </button>
+                                <button
+                                  className={`results-method-option ${method === "phrf-tod" ? "results-method-option--active" : ""}`}
+                                  onClick={() => setConfig({ method: "phrf-tod" })}
+                                >
+                                  PHRF Time-on-Distance
+                                </button>
+                                <button
+                                  className={`results-method-option ${method === "portsmouth" ? "results-method-option--active" : ""}`}
+                                  onClick={() => setConfig({ method: "portsmouth" })}
+                                >
+                                  Portsmouth Yardstick
+                                </button>
+                                <button
+                                  className={`results-method-option ${method === "irc" ? "results-method-option--active" : ""}`}
+                                  onClick={() => setConfig({ method: "irc" })}
+                                >
+                                  IRC
+                                </button>
+                              </div>
+
+                              {/* PHRF ToT settings */}
+                              {method === "phrf-tot" && (
+                                <div className="per-class-method-settings">
+                                  <div className="start-classes-label">B constant source:</div>
+                                  <div className="start-mode-toggle">
+                                    <button
+                                      className={`start-mode-btn ${!config.useFleetAvg ? "start-mode-btn--active" : ""}`}
+                                      onClick={() => setConfig({ useFleetAvg: false })}
+                                    >
+                                      Wind
+                                    </button>
+                                    <button
+                                      className={`start-mode-btn ${config.useFleetAvg ? "start-mode-btn--active" : ""}`}
+                                      onClick={() => setConfig({ useFleetAvg: true })}
+                                    >
+                                      Fleet Avg
+                                    </button>
+                                  </div>
+                                  {!config.useFleetAvg && (
+                                    <>
+                                      <div className="start-classes-label">Wind:</div>
+                                      <div className="start-mode-toggle start-mode-toggle--3">
+                                        {(["light", "medium", "heavy"] as WindCondition[]).map((w) => (
+                                          <button
+                                            key={w}
+                                            className={`start-mode-btn ${(config.wind || "medium") === w ? "start-mode-btn--active" : ""}`}
+                                            onClick={() => setConfig({ wind: w })}
+                                          >
+                                            {w.charAt(0).toUpperCase() + w.slice(1)}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* PHRF ToD settings */}
+                              {method === "phrf-tod" && (
+                                <div className="per-class-method-settings">
+                                  <div className="start-classes-label">Course length:</div>
+                                  {viewMode === "series" && seriesRaces.length > 1 ? (
+                                    <div className="per-class-course-list">
+                                      {seriesRaces.map((race) => {
+                                        const classLapsMap = (race.info.classLaps || {}) as Record<string, number>;
+                                        const laps = classLapsMap[cls] || 1;
+                                        const courseNm = config.courseLengthByRace?.[race.id] ?? config.courseLength ?? 0;
+                                        const totalDist = courseNm * laps;
+                                        return (
+                                          <div key={race.id} className="per-class-course-race-row">
+                                            <span className="per-class-course-race-name">{race.name}</span>
+                                            <input
+                                              className="login-input results-course-input"
+                                              placeholder="0"
+                                              inputMode="decimal"
+                                              value={courseNm || ""}
+                                              onChange={(e) => {
+                                                const val = e.target.value.trim();
+                                                setConfig({
+                                                  courseLengthByRace: {
+                                                    ...(config.courseLengthByRace || {}),
+                                                    [race.id]: val ? Number(val) : 0,
+                                                  },
+                                                });
+                                              }}
+                                            />
+                                            <span className="results-course-unit">nm</span>
+                                            {laps > 1 && (
+                                              <span className="results-course-total">×{laps} = {totalDist.toFixed(1)}</span>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <div className="per-class-course-row">
+                                      <input
+                                        className="login-input results-course-input"
+                                        placeholder="0"
+                                        inputMode="decimal"
+                                        value={config.courseLength ?? ""}
+                                        onChange={(e) => {
+                                          const val = e.target.value.trim();
+                                          setConfig({ courseLength: val ? Number(val) : 0 });
+                                        }}
+                                      />
+                                      <span className="results-course-unit">nm</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Portsmouth settings */}
+                              {method === "portsmouth" && (
+                                <div className="per-class-method-settings">
+                                  <div className="start-classes-label">Reference:</div>
+                                  <div className="start-mode-toggle">
+                                    <button
+                                      className={`start-mode-btn ${(config.portsmouthBase || 1000) === 1000 ? "start-mode-btn--active" : ""}`}
+                                      onClick={() => setConfig({ portsmouthBase: 1000 })}
+                                    >
+                                      1000
+                                    </button>
+                                    <button
+                                      className={`start-mode-btn ${config.portsmouthBase === 100 ? "start-mode-btn--active" : ""}`}
+                                      onClick={() => setConfig({ portsmouthBase: 100 })}
+                                    >
+                                      100
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Per-class warnings */}
+            {perClassEnabled && (
+              <PerClassWarnings
+                raceBoats={raceBoats}
+                boats={boats}
+                perClassConfig={perClassConfig}
+                defaultMethod={correctionMethod}
+              />
+            )}
+
             {hasMultipleRaces && viewMode === "series" && (
               <>
                 <div className="results-config-section">
@@ -1527,29 +1884,77 @@ export default function ResultsTab() {
             )}
             {allClasses.length > 0 && (
               <div className="results-config-section">
-                <div className="start-classes-label">Class time factors:</div>
-                <div className="results-factors">
-                  {effectiveFactors.map((cf) => (
-                    <div key={cf.className} className="results-factor-row">
-                      <span className="results-factor-class">{cf.className}</span>
-                      <div className="results-factor-controls">
-                        <button
-                          className="staged-time-adj"
-                          onClick={() => updateFactor(cf.className, Math.max(0.01, Math.round((cf.factor - 0.05) * 100) / 100))}
-                        >
-                          −
-                        </button>
-                        <span className="results-factor-value">{cf.factor.toFixed(2)}</span>
-                        <button
-                          className="staged-time-adj"
-                          onClick={() => updateFactor(cf.className, Math.round((cf.factor + 0.05) * 100) / 100)}
-                        >
-                          +
-                        </button>
+                <button className="ratings-toggle" onClick={() => setFactorsOpen(!factorsOpen)}>
+                  <span className="ratings-toggle-label">Class time factors</span>
+                  <span className={`race-card-chevron ${factorsOpen ? "race-card-chevron--open" : ""}`}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 6 15 12 9 18" />
+                    </svg>
+                  </span>
+                </button>
+                {factorsOpen && viewMode === "race" && (
+                  <div className="results-factors">
+                    {effectiveFactors.map((cf) => (
+                      <div key={cf.className} className="results-factor-row">
+                        <span className="results-factor-class">{cf.className}</span>
+                        <div className="results-factor-controls">
+                          <button
+                            className="staged-time-adj"
+                            onClick={() => updateFactor(selectedRace.id, cf.className, Math.max(0.01, Math.round((cf.factor - 0.05) * 100) / 100))}
+                          >
+                            −
+                          </button>
+                          <span className="results-factor-value">{cf.factor.toFixed(2)}</span>
+                          <button
+                            className="staged-time-adj"
+                            onClick={() => updateFactor(selectedRace.id, cf.className, Math.round((cf.factor + 0.05) * 100) / 100)}
+                          >
+                            +
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
+                {factorsOpen && viewMode === "series" && (
+                  <div className="results-factors-per-race">
+                    {seriesRaces.map((race) => {
+                      const raceClasses = Array.from(new Set((race.info.boats || []).map((b) => b.class)));
+                      const raceFactors = getEffectiveFactors(race.id, raceClasses);
+                      const hasNonDefault = raceFactors.some((cf) => cf.factor !== 1);
+                      return (
+                        <div key={race.id} className="results-factor-race">
+                          <div className="results-factor-race-name">
+                            {race.name}
+                            {hasNonDefault && <span className="results-factor-modified">modified</span>}
+                          </div>
+                          <div className="results-factors">
+                            {raceFactors.map((cf) => (
+                              <div key={cf.className} className="results-factor-row">
+                                <span className="results-factor-class">{cf.className}</span>
+                                <div className="results-factor-controls">
+                                  <button
+                                    className="staged-time-adj"
+                                    onClick={() => updateFactor(race.id, cf.className, Math.max(0.01, Math.round((cf.factor - 0.05) * 100) / 100))}
+                                  >
+                                    −
+                                  </button>
+                                  <span className="results-factor-value">{cf.factor.toFixed(2)}</span>
+                                  <button
+                                    className="staged-time-adj"
+                                    onClick={() => updateFactor(race.id, cf.className, Math.round((cf.factor + 0.05) * 100) / 100)}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1599,7 +2004,7 @@ export default function ResultsTab() {
 
       {/* Column toggles */}
       <ColumnToggles
-        columns={getRaceColumns(timingMethod)}
+        columns={getRaceColumns(timingMethod, perClassEnabled)}
         visible={visibleCols}
         onToggle={toggleCol}
       />

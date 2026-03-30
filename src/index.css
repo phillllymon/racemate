@@ -2063,6 +2063,9 @@ body {
   text-align: left;
   padding: 0 0.75rem;
   transition: border-color 0.15s, color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .results-method-option--active {
@@ -2291,6 +2294,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
+  height: 32px;
 }
 
 .results-row--first .results-cell {
@@ -2301,10 +2305,12 @@ body {
   display: table-cell;
   font-size: 0.85rem;
   color: var(--text-light);
-  padding: 0.45rem 0.4rem;
+  padding: 0 0.4rem;
+  height: 40px;
   border-bottom: 1px solid rgba(255 255 255 / 0.04);
   vertical-align: middle;
   white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .results-cell--rank {
@@ -2330,7 +2336,7 @@ body {
 
 .results-cell--data {
   text-align: right;
-  padding: 0.45rem 0.5rem;
+  padding: 0 0.5rem;
 }
 
 .results-cell--mono {
@@ -2839,4 +2845,130 @@ body {
 
 .finish-hide-toggle input {
   accent-color: var(--orange);
+}
+
+/* ---- Per-race class factors ---- */
+
+.results-factors-per-race {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.results-factor-race {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  background: rgba(255 255 255 / 0.02);
+  border-radius: 6px;
+  border: 1px solid rgba(255 255 255 / 0.04);
+}
+
+.results-factor-race-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.results-factor-modified {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--orange);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* ---- Per-class timing config ---- */
+
+.per-class-method-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: auto;
+  font-weight: 400;
+}
+
+.per-class-section {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 0.25rem;
+}
+
+.per-class-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: var(--input-bg);
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+.per-class-header-name {
+  font-weight: 600;
+  color: var(--white);
+}
+
+.per-class-config {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(255 255 255 / 0.02);
+  border-top: 1px solid var(--input-border);
+}
+
+.per-class-method-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.25rem;
+}
+
+.per-class-course-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.per-class-course-row .results-course-input {
+  width: 80px;
+  flex: 0 0 auto;
+}
+
+/* ---- Per-class per-race course lengths ---- */
+
+.per-class-course-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.per-class-course-race-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.per-class-course-race-name {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.per-class-course-race-row .results-course-input {
+  width: 65px;
+  flex: 0 0 auto;
 }
