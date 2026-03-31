@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRaces } from "./RaceContext";
 import { useTime } from "./TimeContext";
 import type { Boat } from "./RaceContext";
 import type { RaceBoatEntry } from "./api";
 
 // ---- Types ----
+
+export type FinishTimeDisplay = "clock" | "elapsed";
 
 interface StagedBoat {
   boatId: number | null; // null = unidentified MARK
@@ -17,7 +19,7 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-// ---- Search results ----
+// ---- Time formatting ----
 
 function formatFinishTimeShort(ms: number): string {
   const d = new Date(ms);
@@ -27,12 +29,44 @@ function formatFinishTimeShort(ms: number): string {
   return `${h}:${m}:${s}`;
 }
 
+function formatElapsedShort(elapsedMs: number): string {
+  const totalSec = Math.floor(elapsedMs / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+import type { StartInfo } from "./api";
+
+function formatFinishTime(
+  finishTimeMs: number,
+  mode: FinishTimeDisplay,
+  boatClass: string | undefined,
+  starts: StartInfo[]
+): string {
+  if (mode === "clock") return formatFinishTimeShort(finishTimeMs);
+  // Elapsed mode: find the start time for this boat's class
+  if (boatClass) {
+    const start = starts.find((s) => s.classes.includes(boatClass));
+    if (start?.startTime != null) {
+      const elapsed = finishTimeMs - start.startTime;
+      if (elapsed > 0) return formatElapsedShort(elapsed);
+    }
+  }
+  // Fallback to clock if we can't compute elapsed
+  return formatFinishTimeShort(finishTimeMs);
+}
+
 function SearchResults({
   query,
   boats,
   raceBoats,
   stagedIds,
   hideFinished,
+  finishTimeDisplay,
+  starts,
   onStage,
   onAdjustFinish,
   onUnfinish,
@@ -42,6 +76,8 @@ function SearchResults({
   raceBoats: RaceBoatEntry[];
   stagedIds: Set<number>;
   hideFinished: boolean;
+  finishTimeDisplay: FinishTimeDisplay;
+  starts: StartInfo[];
   onStage: (boatId: number) => void;
   onAdjustFinish: (boatId: number, delta: number) => void;
   onUnfinish: (boatId: number) => void;
@@ -100,7 +136,7 @@ function SearchResults({
               </div>
               <span className="finish-search-item-status">
                 {alreadyFinished
-                  ? formatFinishTimeShort(rb.finishTime as number)
+                  ? formatFinishTime(rb.finishTime as number, finishTimeDisplay, rb.class, starts)
                   : alreadyStaged ? "Staged" : rb.status}
               </span>
             </button>
@@ -109,7 +145,7 @@ function SearchResults({
               <div className="finish-edit-row">
                 <div className="staged-time-display">
                   <button className="staged-time-adj" onClick={() => onAdjustFinish(rb.boatId, -1000)}>−1s</button>
-                  <span className="staged-time">{formatFinishTimeShort(rb.finishTime as number)}</span>
+                  <span className="staged-time">{formatFinishTime(rb.finishTime as number, finishTimeDisplay, rb.class, starts)}</span>
                   <button className="staged-time-adj" onClick={() => onAdjustFinish(rb.boatId, 1000)}>+1s</button>
                 </div>
                 <button
@@ -136,6 +172,8 @@ function StagedBoatRow({
   lapInfo,
   isFirst,
   isLast,
+  finishTimeDisplay,
+  starts,
   onMoveUp,
   onMoveDown,
   onFinish,
@@ -153,6 +191,8 @@ function StagedBoatRow({
   lapInfo: { totalLaps: number; lapsCompleted: number } | null;
   isFirst: boolean;
   isLast: boolean;
+  finishTimeDisplay: FinishTimeDisplay;
+  starts: StartInfo[];
   onMoveUp: () => void;
   onMoveDown: () => void;
   onFinish: () => void;
@@ -249,14 +289,14 @@ function StagedBoatRow({
               {finishLabel}
             </button>
             <button className="staged-refinish-btn" onClick={onRefinish}>
-              {formatFinishTimeShort(staged.lastFinishTime!)}
+              {formatFinishTime(staged.lastFinishTime!, finishTimeDisplay, raceBoat?.class, starts)}
             </button>
           </div>
         )}
         {isFinished && (
           <div className="staged-time-display">
             <button className="staged-time-adj" onClick={() => onAdjustTime(-1000)}>−1s</button>
-            <span className="staged-time">{formatFinishTimeShort(staged.finishTime!)}</span>
+            <span className="staged-time">{formatFinishTime(staged.finishTime!, finishTimeDisplay, raceBoat?.class, starts)}</span>
             <button className="staged-time-adj" onClick={() => onAdjustTime(1000)}>+1s</button>
           </div>
         )}
@@ -325,6 +365,20 @@ export default function FinishTab() {
   const { now } = useTime();
   const [search, setSearch] = useState("");
   const [hideFinished, setHideFinished] = useState(false);
+  const [finishTimeDisplay, setFinishTimeDisplay] = useState<FinishTimeDisplay>(
+    (localStorage.getItem("racemate-finish-display") as FinishTimeDisplay) || "clock"
+  );
+
+  // Listen for settings changes
+  useEffect(() => {
+    const handler = () => {
+      setFinishTimeDisplay(
+        (localStorage.getItem("racemate-finish-display") as FinishTimeDisplay) || "clock"
+      );
+    };
+    window.addEventListener("racemate-settings-changed", handler);
+    return () => window.removeEventListener("racemate-settings-changed", handler);
+  }, []);
   const [staged, setStaged] = useState<StagedBoat[]>([]);
   const [stagingOpen, setStagingOpen] = useState(true);
 
@@ -501,6 +555,8 @@ export default function FinishTab() {
                   lapInfo={li}
                   isFirst={i === 0}
                   isLast={i === staged.length - 1}
+                  finishTimeDisplay={finishTimeDisplay}
+                  starts={selectedRace.info.starts || []}
                   onMoveUp={() => moveStaged(i, -1)}
                   onMoveDown={() => moveStaged(i, 1)}
                   onFinish={() => finishBoat(s.id)}
@@ -532,6 +588,8 @@ export default function FinishTab() {
         raceBoats={raceBoats}
         stagedIds={stagedBoatIds}
         hideFinished={hideFinished}
+        finishTimeDisplay={finishTimeDisplay}
+        starts={selectedRace.info.starts || []}
         onStage={stageBoat}
         onAdjustFinish={(boatId, delta) => {
           const rb = raceBoats.find((b) => b.boatId === boatId);

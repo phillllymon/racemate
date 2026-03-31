@@ -32,6 +32,60 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ---- Light mode ---- */
+html.theme-light {
+  --navy: #f0f2f5;
+  --navy-mid: #e2e6eb;
+  --input-bg: #ffffff;
+  --input-border: #c0c8d0;
+  --sky: #2a6db5;
+  --orange: #d45820;
+  --white: #1a1a2e;
+  --text-light: #333344;
+  --text-muted: #6b7280;
+  --red: #dc2626;
+}
+
+html.theme-light body {
+  background: var(--navy);
+  color: var(--white);
+}
+
+/* ---- High contrast ---- */
+html.theme-highcontrast {
+  --navy: #000000;
+  --navy-mid: #111111;
+  --input-bg: #1a1a1a;
+  --input-border: #555555;
+  --sky: #00bfff;
+  --orange: #ff8c00;
+  --white: #ffffff;
+  --text-light: #f0f0f0;
+  --text-muted: #bbbbbb;
+  --red: #ff4444;
+}
+
+html.theme-highcontrast .btn-primary {
+  color: #000000;
+  font-weight: 800;
+}
+
+html.theme-highcontrast .btn-secondary {
+  border-width: 2px;
+}
+
+html.theme-highcontrast .results-cell {
+  border-bottom-color: rgba(255 255 255 / 0.15);
+}
+
+html.theme-highcontrast .topbar {
+  border-bottom: 1px solid #555;
+}
+
+html.theme-highcontrast .tabbar {
+  border-top: 1px solid #555;
+}
+
 html, body, #root {
   height: 100%;
 }
@@ -1555,110 +1609,238 @@ body {
 
 /* ---- Chart tab ---- */
 
-.chart-tab {
+.chart-tab-full {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-  padding-bottom: 1rem;
   height: 100%;
+  position: relative;
+  margin: -1rem -1rem 0;
 }
 
-.chart-position {
-  width: 100%;
-  padding: 0.75rem;
-  background: var(--navy-mid);
-  border: 1px solid var(--input-border);
-  border-radius: 10px;
+.chart-map-container {
+  flex: 1;
+  min-height: 0;
+  z-index: 0;
 }
 
-.chart-coords {
-  display: flex;
-  gap: 1.5rem;
-  justify-content: center;
+/* Position info overlay */
+.chart-info-overlay {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  right: 0.5rem;
+  z-index: 1000;
+  pointer-events: none;
 }
 
-.chart-coord-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.chart-coord-label {
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-}
-
-.chart-coord-value {
+.chart-coords-compact {
+  display: inline-flex;
+  gap: 0.75rem;
+  padding: 0.35rem 0.75rem;
+  background: rgba(0 0 0 / 0.7);
+  border-radius: 8px;
   font-family: var(--font-display);
-  font-size: 1.1rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--white);
+  color: #ffffff;
+  backdrop-filter: blur(4px);
 }
 
 .chart-error {
-  text-align: center;
-  font-size: 0.9rem;
-  color: var(--red);
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  background: rgba(200 50 50 / 0.85);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: #ffffff;
 }
 
 .chart-loading {
-  text-align: center;
-  font-size: 0.9rem;
-  color: var(--text-muted);
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  background: rgba(0 0 0 / 0.7);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: #ffffff;
 }
 
-.chart-map-placeholder {
-  flex: 1;
-  width: 100%;
-  min-height: 200px;
-  background: var(--navy-mid);
-  border: 1px solid var(--input-border);
-  border-radius: 10px;
+/* Recenter button */
+.chart-recenter-btn {
+  position: absolute;
+  bottom: 12rem;
+  right: 0.75rem;
+  z-index: 1000;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
-  overflow: hidden;
+  background: var(--navy-mid);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  color: var(--sky);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0 0 0 / 0.3);
 }
 
-.chart-map-text {
-  font-size: 0.9rem;
+.chart-recenter-btn:active {
+  background: var(--input-bg);
+}
+
+/* Controls panel */
+.chart-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 0.5rem 0.75rem 0.75rem;
+  background: var(--navy);
+  border-top: 1px solid var(--input-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.chart-layer-toggles {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.chart-layer-btn {
+  padding: 0.35rem 0.6rem;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 600;
   color: var(--text-muted);
+  background: var(--input-bg);
+  border: 1.5px solid var(--input-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
 }
 
-.chart-map-dot {
+.chart-layer-btn--active {
+  border-color: var(--orange);
+  color: var(--white);
+}
+
+.chart-layer-btn:active {
+  opacity: 0.85;
+}
+
+/* Race marks list */
+.chart-marks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.chart-mark-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  background: rgba(255 255 255 / 0.03);
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.chart-mark-label {
+  font-weight: 600;
+  color: var(--orange);
+  min-width: 30px;
+}
+
+.chart-mark-coords {
+  flex: 1;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.chart-mark-remove {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.chart-mark-remove:active {
+  color: var(--red);
+}
+
+/* Add mark form */
+.chart-add-mark-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.chart-mark-input {
+  height: 36px;
+  font-size: 0.85rem;
+}
+
+.chart-add-mark-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.chart-add-mark-actions .btn {
+  flex: 1;
+  height: 36px !important;
+  font-size: 0.8rem !important;
+  width: auto !important;
+}
+
+/* Position marker on map */
+.chart-position-marker {
+  background: none !important;
+  border: none !important;
+}
+
+.chart-pos-dot {
   position: relative;
-  width: 20px;
-  height: 20px;
+  width: 40px;
+  height: 40px;
 }
 
-.chart-map-dot-inner {
+.chart-pos-dot-inner {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 12px;
-  height: 12px;
-  background: var(--sky);
+  width: 14px;
+  height: 14px;
+  background: #4a90c4;
   border-radius: 50%;
-  border: 2px solid var(--white);
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0 0 0 / 0.4);
 }
 
-.chart-map-dot-ring {
+.chart-pos-dot-ring {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   width: 40px;
   height: 40px;
-  border: 2px solid var(--sky);
+  border: 2px solid #4a90c4;
   border-radius: 50%;
-  opacity: 0.3;
+  opacity: 0.4;
   animation: dotPulse 2s ease-out infinite;
 }
 
@@ -1667,10 +1849,32 @@ body {
   100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
 }
 
-.chart-hint {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  text-align: center;
+/* Mark pin on map */
+.chart-mark-icon {
+  background: none !important;
+  border: none !important;
+}
+
+.chart-mark-pin {
+  width: 28px;
+  height: 36px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 4px;
+  background: var(--orange);
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 2px 6px rgba(0 0 0 / 0.4);
+}
+
+.chart-mark-pin span {
+  transform: rotate(45deg);
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1;
 }
 
 /* ---- Finish tab ---- */
@@ -2971,4 +3175,138 @@ body {
 .per-class-course-race-row .results-course-input {
   width: 65px;
   flex: 0 0 auto;
+}
+
+/* ---- Settings modal ---- */
+
+.topbar-menu-item--danger {
+  color: var(--red) !important;
+}
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0 0 0 / 0.6);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.settings-modal {
+  width: 100%;
+  max-width: 420px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--navy);
+  border: 1px solid var(--input-border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0 0 0 / 0.5);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--input-border);
+  flex-shrink: 0;
+}
+
+.settings-title {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--white);
+}
+
+.settings-close {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.settings-close:active {
+  background: rgba(255 255 255 / 0.05);
+}
+
+.settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-section-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.settings-theme-options {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.settings-theme-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.75rem 0.5rem;
+  background: var(--input-bg);
+  border: 2px solid var(--input-border);
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: border-color 0.15s;
+}
+
+.settings-theme-btn--active {
+  border-color: var(--orange);
+  color: var(--white);
+}
+
+.settings-theme-preview {
+  width: 48px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid rgba(128 128 128 / 0.3);
+}
+
+.settings-theme-preview--dark {
+  background: linear-gradient(135deg, #0b1d33 60%, #142840);
+}
+
+.settings-theme-preview--light {
+  background: linear-gradient(135deg, #f0f2f5 60%, #e2e6eb);
+}
+
+.settings-theme-preview--hc {
+  background: linear-gradient(135deg, #000000 60%, #111111);
+  border-color: #ffffff;
 }
