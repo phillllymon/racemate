@@ -27,6 +27,9 @@ const getRacesByPropertiesHandler = require("./api/getRacesByProperties.js").def
 const getRacesByColumnHandler = require("./api/getRacesByColumn.js").default;
 const getSeriesByPropertiesHandler = require("./api/getSeriesByProperties.js").default;
 const getSeriesByColumnHandler = require("./api/getSeriesByColumn.js").default;
+const deleteBoatHandler = require("./api/deleteBoat.js").default;
+const deleteRaceHandler = require("./api/deleteRace.js").default;
+const deleteSeriesHandler = require("./api/deleteSeries.js").default;
 
 const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
@@ -48,6 +51,9 @@ const server = http.createServer((req, res) => {
         if (req.url === "/api/getRacesByColumn") return getRacesByColumnHandler(req, res);
         if (req.url === "/api/getSeriesByProperties") return getSeriesByPropertiesHandler(req, res);
         if (req.url === "/api/getSeriesByColumn") return getSeriesByColumnHandler(req, res);
+        if (req.url === "/api/deleteBoat") return deleteBoatHandler(req, res);
+        if (req.url === "/api/deleteRace") return deleteRaceHandler(req, res);
+        if (req.url === "/api/deleteSeries") return deleteSeriesHandler(req, res);
 
         res.writeHead(404);
         return res.end("API route not found");
