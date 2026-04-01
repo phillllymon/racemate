@@ -716,7 +716,7 @@ function RaceResultsView({
 // ---- Series results view ----
 
 function SeriesResultsView({
-  results, races, seriesName, seriesMethod, visibleCols, customCols, timingMethod, topN,
+  results, races, seriesName, seriesMethod, visibleCols, customCols, topN,
 }: {
   results: SeriesBoatResult[];
   races: Race[];

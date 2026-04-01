@@ -875,7 +875,6 @@ function StartCard({
             const cd = formatCountdown(timeUntilStart!);
             return (
               <div className="start-countdown-big">
-                {cd.dayPlus && <div className="start-countdown-day-big">+1 day</div>}
                 <div className="start-countdown-time">{cd.text}</div>
                 <div className="start-countdown-abs">Start at {formatAbsoluteTime(startTime)}</div>
               </div>
