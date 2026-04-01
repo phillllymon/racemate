@@ -2,8 +2,8 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import type { ReactNode } from "react";
 import { useAuth } from "./AuthContext";
 import {
-  addRace, updateRace, getRacesByColumn,
-  addSeries, updateSeries, getSeriesByColumn,
+  addRace, updateRace, getRacesByColumn, deleteRace,
+  addSeries, updateSeries, getSeriesByColumn, deleteSeries,
   addBoat, updateBoat, getBoatsByColumn,
 } from "./api";
 import type {
@@ -61,6 +61,9 @@ interface RaceContextValue {
   updateBoatData: (boatId: number, name: string, info: BoatInfo) => void;
   updateRaceData: (raceId: number, name: string, info: RaceInfo) => void;
   updateSeriesData: (seriesId: number, name: string, info: SeriesInfo) => void;
+  softDeleteBoat: (boatId: number) => void;
+  removeRace: (raceId: number) => Promise<void>;
+  removeSeries: (seriesId: number) => Promise<void>;
   refreshAll: () => Promise<void>;
 }
 
@@ -350,6 +353,80 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Soft delete a boat (marks as deleted, keeps record for historical races)
+  const softDeleteBoat = (boatId: number) => {
+    setBoats((prev) =>
+      prev.map((b) => {
+        if (b.id !== boatId) return b;
+        const updatedInfo = { ...b.info, deleted: true };
+        if (auth) {
+          queueUpdate(`boat-${boatId}`, () => updateBoat(auth, boatId, b.name, updatedInfo));
+        }
+        return { ...b, info: updatedInfo };
+      })
+    );
+  };
+
+  // Delete a race from the database and remove from its parent series
+  const removeRace = async (raceId: number) => {
+    // Remove from parent series
+    setSeries((prev) =>
+      prev.map((s) => {
+        if (!s.info.raceIds.includes(raceId)) return s;
+        const updatedInfo = { ...s.info, raceIds: s.info.raceIds.filter((id) => id !== raceId) };
+        if (auth) {
+          queueUpdate(`series-${s.id}`, () => updateSeries(auth, s.id, s.name, updatedInfo));
+        }
+        return { ...s, info: updatedInfo };
+      })
+    );
+
+    // Remove from local state
+    setRaces((prev) => prev.filter((r) => r.id !== raceId));
+
+    // Deselect if this was the selected race
+    setSelectedRaceId((prev) => (prev === raceId ? null : prev));
+
+    // Delete from database
+    if (auth) {
+      try {
+        await deleteRace(auth, raceId);
+      } catch {
+        // If delete fails, data will be re-synced on next refresh
+      }
+    }
+  };
+
+  // Delete a series and all its races
+  const removeSeries = async (seriesId: number) => {
+    const s = series.find((s) => s.id === seriesId);
+    const raceIdsToDelete = s?.info.raceIds || [];
+
+    // Deselect if current race is in this series
+    setSelectedRaceId((prev) => {
+      if (prev != null && raceIdsToDelete.includes(prev)) return null;
+      return prev;
+    });
+
+    // Remove races from local state
+    setRaces((prev) => prev.filter((r) => !raceIdsToDelete.includes(r.id)));
+
+    // Remove series from local state
+    setSeries((prev) => prev.filter((s) => s.id !== seriesId));
+
+    // Delete from database
+    if (auth) {
+      try {
+        for (const raceId of raceIdsToDelete) {
+          await deleteRace(auth, raceId);
+        }
+        await deleteSeries(auth, seriesId);
+      } catch {
+        // If deletes fail, will be cleaned up on refresh
+      }
+    }
+  };
+
   return (
     <RaceContext.Provider
       value={{
@@ -359,6 +436,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         selectRace: setSelectedRaceId,
         createSeries, createRace, createBoat,
         updateBoatData, updateRaceData, updateSeriesData,
+        softDeleteBoat, removeRace, removeSeries,
         refreshAll,
       }}
     >

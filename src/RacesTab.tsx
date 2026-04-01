@@ -1,9 +1,42 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useRaces } from "./RaceContext";
 import { useTime } from "./TimeContext";
 import type { Race, Series, Boat } from "./RaceContext";
 import type { BoatInfo, RaceBoatEntry, RaceInfo } from "./api";
 import SpreadsheetImport from "./SpreadsheetImport";
+
+// ---- Confirmation modal ----
+
+function ConfirmModal({
+  title,
+  message,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return createPortal(
+    <div className="confirm-overlay" onClick={onCancel}>
+      <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="confirm-title">{title}</div>
+        <div className="confirm-message">{message}</div>
+        <div className="confirm-actions">
+          <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-sm confirm-delete-btn" onClick={onConfirm}>
+            {confirmLabel || "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 // ---- Custom fields editor (key/value pairs) ----
 
@@ -84,8 +117,9 @@ function EditBoatForm({
   raceEntry: RaceBoatEntry;
   onDone: () => void;
 }) {
-  const { updateRaceData, updateBoatData, races } = useRaces();
+  const { updateRaceData, updateBoatData, races, softDeleteBoat } = useRaces();
   const race = races.find((r) => r.id === raceId)!;
+  const [confirmDelete, setConfirmDelete] = useState(false);;
 
   const [name, setName] = useState(boat.info.name || boat.name);
   const [sailNumber, setSailNumber] = useState(boat.info.sailNumber || "");
@@ -195,6 +229,20 @@ function EditBoatForm({
         <button className="btn btn-primary" onClick={save}>Save</button>
         <button className="btn btn-secondary" onClick={onDone}>Cancel</button>
       </div>
+      <button className="btn-text-danger" onClick={() => setConfirmDelete(true)}>
+        Delete boat from database
+      </button>
+      {confirmDelete && (
+        <ConfirmModal
+          title="Delete Boat"
+          message={`Remove "${boat.name}" from your database? It will still appear in historical race results.`}
+          onConfirm={() => {
+            softDeleteBoat(boat.id);
+            onDone();
+          }}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
     </div>
   );
 }
@@ -410,6 +458,7 @@ function AddBoatForm({
   const existingBoatIds = (race.info.boats || []).map((b) => b.boatId);
 
   const filteredExisting = boats.filter((b) => {
+    if (b.info.deleted) return false;
     if (existingBoatIds.includes(b.id)) return false;
     if (!search.trim()) return true;
     const s = search.toLowerCase();
@@ -693,7 +742,7 @@ function ClassSection({
 // ---- Race card ----
 
 function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
-  const { selectedRaceId, selectRace, updateRaceData, boats } = useRaces();
+  const { selectedRaceId, selectRace, updateRaceData, boats, removeRace } = useRaces();
   const [expanded, setExpanded] = useState(false);
   const [editingBoatId, setEditingBoatId] = useState<number | null>(null);
   const [editingRace, setEditingRace] = useState(false);
@@ -701,6 +750,7 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   const [newClassName, setNewClassName] = useState("");
   const [emptyClasses, setEmptyClasses] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  const [confirmDeleteRace, setConfirmDeleteRace] = useState(false);
   const [editName, setEditName] = useState(race.name);
   const [editAutoCheckIn, setEditAutoCheckIn] = useState(race.info.autoCheckIn ?? true);
   const [editWind, setEditWind] = useState<string>((race.info.windCondition as string) || "medium");
@@ -843,6 +893,20 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
                 <button className="btn btn-primary" onClick={saveRaceEdit}>Save</button>
                 <button className="btn btn-secondary" onClick={() => setEditingRace(false)}>Cancel</button>
               </div>
+              <button className="btn-text-danger" onClick={() => setConfirmDeleteRace(true)}>
+                Delete this race
+              </button>
+              {confirmDeleteRace && (
+                <ConfirmModal
+                  title="Delete Race"
+                  message={`Permanently delete "${race.name}" and all its data? This cannot be undone.`}
+                  onConfirm={() => {
+                    removeRace(race.id);
+                    setConfirmDeleteRace(false);
+                  }}
+                  onCancel={() => setConfirmDeleteRace(false)}
+                />
+              )}
             </div>
           ) : editingBoat && editingEntry ? (
             <EditBoatForm
@@ -924,11 +988,12 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
 // ---- Series card ----
 
 function SeriesCard({ s }: { s: Series }) {
-  const { races, selectRace, updateSeriesData } = useRaces();
+  const { races, selectRace, updateSeriesData, removeSeries } = useRaces();
   const [expanded, setExpanded] = useState(false);
   const [addingRace, setAddingRace] = useState(false);
   const [editingSeries, setEditingSeries] = useState(false);
   const [editName, setEditName] = useState(s.name);
+  const [confirmDeleteSeries, setConfirmDeleteSeries] = useState(false);
 
   const seriesRaces = s.info.raceIds
     .map((id) => races.find((r) => r.id === id))
@@ -982,6 +1047,20 @@ function SeriesCard({ s }: { s: Series }) {
                 <button className="btn btn-primary" onClick={saveSeriesEdit}>Save</button>
                 <button className="btn btn-secondary" onClick={() => setEditingSeries(false)}>Cancel</button>
               </div>
+              <button className="btn-text-danger" onClick={() => setConfirmDeleteSeries(true)}>
+                Delete series and all races
+              </button>
+              {confirmDeleteSeries && (
+                <ConfirmModal
+                  title="Delete Series"
+                  message={`Permanently delete "${s.name}" and its ${seriesRaces.length} race${seriesRaces.length !== 1 ? "s" : ""}? This cannot be undone.`}
+                  onConfirm={() => {
+                    removeSeries(s.id);
+                    setConfirmDeleteSeries(false);
+                  }}
+                  onCancel={() => setConfirmDeleteSeries(false)}
+                />
+              )}
             </div>
           ) : (
             <>

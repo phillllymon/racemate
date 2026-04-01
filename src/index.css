@@ -1902,19 +1902,15 @@ body {
 .finish-search-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   width: 100%;
-  padding: 0.65rem 0.75rem;
   background: var(--input-bg);
   border: 1px solid var(--input-border);
   border-radius: 8px;
-  cursor: pointer;
-  font-family: var(--font-body);
-  text-align: left;
+  overflow: hidden;
   transition: background 0.15s;
 }
 
-.finish-search-item:active:not(:disabled) {
+.finish-search-item-main:active {
   background: rgba(255 255 255 / 0.08);
 }
 
@@ -3309,4 +3305,190 @@ body {
 .settings-theme-preview--hc {
   background: linear-gradient(135deg, #000000 60%, #111111);
   border-color: #ffffff;
+}
+
+/* ---- Confirm modal ---- */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0 0 0 / 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.confirm-modal {
+  width: 100%;
+  max-width: 340px;
+  background: var(--navy);
+  border: 1px solid var(--input-border);
+  border-radius: 14px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 12px 48px rgba(0 0 0 / 0.5);
+}
+
+.confirm-title {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--white);
+}
+
+.confirm-message {
+  font-size: 0.9rem;
+  color: var(--text-light);
+  line-height: 1.4;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.confirm-actions .btn {
+  flex: 1;
+}
+
+.confirm-delete-btn {
+  background: var(--red) !important;
+  color: #ffffff !important;
+  border: none !important;
+}
+
+.confirm-delete-btn:active {
+  opacity: 0.85;
+}
+
+/* ---- Text danger button ---- */
+
+.btn-text-danger {
+  width: 100%;
+  padding: 0.5rem 0;
+  background: none;
+  border: none;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--red);
+  cursor: pointer;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.btn-text-danger:active {
+  opacity: 1;
+}
+
+/* ---- Status menu in finish tab ---- */
+
+.finish-search-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0 0.5rem 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+  text-align: left;
+}
+
+.finish-search-item-dots {
+  width: 32px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+.finish-search-item-dots:active {
+  color: var(--white);
+}
+
+.finish-status-menu {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem 0.4rem;
+}
+
+.finish-status-menu-item {
+  height: 32px;
+  padding: 0 0.65rem;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-light);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.finish-status-menu-item:active {
+  border-color: var(--white);
+}
+
+.finish-status-menu-item--danger {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.finish-status-menu-item--danger:active {
+  background: var(--red);
+  color: #ffffff;
+}
+
+.finish-search-item--dnf {
+  opacity: 0.5;
+}
+
+.finish-search-item--dnf .finish-search-item-status {
+  color: var(--red);
+  font-weight: 700;
+}
+
+/* ---- Racing / re-open OCS button ---- */
+
+.post-start-racing-btn {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: rgba(74 222 128 / 0.08);
+  border: 1px solid rgba(74 222 128 / 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-body);
+}
+
+.post-start-racing-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #4ade80;
+}
+
+.post-start-racing-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.post-start-racing-btn:active {
+  background: rgba(74 222 128 / 0.15);
 }

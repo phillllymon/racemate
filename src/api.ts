@@ -274,3 +274,27 @@ export async function getSeriesByColumn(
     targetVal,
   });
 }
+
+// ---- Deletes ----
+
+export async function deleteRace(
+  auth: AuthParams,
+  raceId: number
+): Promise<{ message: string }> {
+  return post("deleteRace", {
+    userId: auth.userId,
+    token: auth.token,
+    raceId: String(raceId),
+  });
+}
+
+export async function deleteSeries(
+  auth: AuthParams,
+  seriesId: number
+): Promise<{ message: string }> {
+  return post("deleteSeries", {
+    userId: auth.userId,
+    token: auth.token,
+    seriesId: String(seriesId),
+  });
+}

@@ -648,7 +648,7 @@ function RaceResultsView({
         <span className="results-table-title">{raceName}</span>
         <button
           className="btn btn-secondary btn-sm"
-          onClick={() => downloadCSV(exportRaceCSVWithSummary(results, topN), `${raceName}_results.csv`)}
+          onClick={() => downloadCSV(exportRaceCSVWithSummary(results, topN, customCols, timingMethod), `${raceName}_results.csv`)}
         >
           Export
         </button>
@@ -716,7 +716,7 @@ function RaceResultsView({
 // ---- Series results view ----
 
 function SeriesResultsView({
-  results, races, seriesName, seriesMethod, visibleCols, customCols, topN,
+  results, races, seriesName, seriesMethod, visibleCols, customCols, timingMethod, topN,
 }: {
   results: SeriesBoatResult[];
   races: Race[];
@@ -735,7 +735,7 @@ function SeriesResultsView({
         <span className="results-table-title">{seriesName} — Series</span>
         <button
           className="btn btn-secondary btn-sm"
-          onClick={() => downloadCSV(exportSeriesCSVWithSummary(results, races, seriesMethod, topN), `${seriesName}_series.csv`)}
+          onClick={() => downloadCSV(exportSeriesCSVWithSummary(results, races, seriesMethod, topN, customCols), `${seriesName}_series.csv`)}
         >
           Export
         </button>
@@ -1049,6 +1049,15 @@ function SeriesSummary({
 
 // ---- CSV with summary ----
 
+function csvEscape(val: string | number | null | undefined): string {
+  if (val == null) return "—";
+  const s = String(val);
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
 function buildSummaryCSV(
   results: BoatResult[],
   topN: number,
@@ -1060,18 +1069,32 @@ function buildSummaryCSV(
     .filter((r) => r[rankField] != null && r[rankField]! <= topN)
     .sort((a, b) => a[rankField]! - b[rankField]!);
   lines.push(`\n${label}`);
-  lines.push("Rank,Boat,Class,Corrected Time");
+  lines.push("Rank,Boat,Skipper,Class,Corrected Time");
   top.forEach((r) => {
-    lines.push(`${r[rankField]},${r.boatName},${r.className},${formatElapsed(r.correctedMs)}`);
+    lines.push([r[rankField], csvEscape(r.boatName), csvEscape(r.skipper), csvEscape(r.className), formatElapsed(r.correctedMs)].join(","));
   });
   return lines;
 }
 
-function exportRaceCSVWithSummary(results: RaceResults, topN: number): string {
-  // Summary
-  const lines: string[] = [`${results.raceName} — Summary`];
+function exportRaceCSVWithSummary(
+  results: RaceResults,
+  topN: number,
+  customCols: string[],
+  timingMethod: string
+): string {
+  const lines: string[] = [`${results.raceName} — Results`];
+
+  // Timing method info
+  const methodLabel = timingMethod === "absolute" ? "Absolute Time" :
+    timingMethod === "phrf-tot" ? "PHRF Time-on-Time" :
+    timingMethod === "phrf-tod" ? "PHRF Time-on-Distance" :
+    timingMethod === "portsmouth" ? "Portsmouth Yardstick" :
+    timingMethod === "irc" ? "IRC" : timingMethod;
+  lines.push(`Scoring: ${methodLabel}`);
+
   const sorted = [...results.boats].sort((a, b) => (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity));
 
+  // Summary
   lines.push(...buildSummaryCSV(sorted, topN, `Top ${topN} Overall`, "overallRank"));
 
   const classes = Array.from(new Set(results.boats.map((r) => r.className)));
@@ -1083,20 +1106,25 @@ function exportRaceCSVWithSummary(results: RaceResults, topN: number): string {
   // Full results
   lines.push("");
   lines.push("Full Results");
-  lines.push("Overall Rank,Class Rank,Boat,Sail #,Skipper,Class,Rating,Elapsed,Corrected,Status");
+  const customHeaders = customCols.map((c) => csvEscape(c)).join(",");
+  const baseHeader = "Overall Rank,Class Rank,Boat,Sail #,Skipper,Class,Rating,Elapsed,Corrected,Laps,Status";
+  lines.push(customCols.length > 0 ? `${baseHeader},${customHeaders}` : baseHeader);
   sorted.forEach((r) => {
-    lines.push([
+    const customValues = customCols.map((c) => csvEscape(r.customFields[c] || "")).join(",");
+    const row = [
       r.overallRank ?? "—",
       r.classRank ?? "—",
-      r.boatName,
-      r.sailNumber,
-      r.skipper,
-      r.className,
+      csvEscape(r.boatName),
+      csvEscape(r.sailNumber),
+      csvEscape(r.skipper),
+      csvEscape(r.className),
       r.rating ?? "—",
       formatElapsed(r.elapsedMs),
       formatElapsed(r.correctedMs),
+      r.totalLaps > 1 ? `${r.lapsCompleted}/${r.totalLaps}` : "",
       statusLabel(r.status),
-    ].join(","));
+    ].join(",");
+    lines.push(customCols.length > 0 ? `${row},${customValues}` : row);
   });
 
   return lines.join("\n");
@@ -1106,9 +1134,10 @@ function exportSeriesCSVWithSummary(
   results: SeriesBoatResult[],
   races: Race[],
   seriesMethod: SeriesMethod,
-  topN: number
+  topN: number,
+  customCols: string[]
 ): string {
-  const lines: string[] = ["Series Summary"];
+  const lines: string[] = ["Series Results"];
 
   const formatTotal = (r: SeriesBoatResult) => {
     if (seriesMethod === "points") return r.totalPoints != null ? `${r.totalPoints} pts` : "—";
@@ -1118,9 +1147,9 @@ function exportSeriesCSVWithSummary(
   // Top N overall
   const topOverall = results.filter((r) => r.seriesOverallRank != null && r.seriesOverallRank <= topN);
   lines.push(`\nTop ${topN} Overall`);
-  lines.push("Rank,Boat,Class,Total");
+  lines.push("Rank,Boat,Skipper,Class,Total");
   topOverall.forEach((r) => {
-    lines.push(`${r.seriesOverallRank},${r.boatName},${r.className},${formatTotal(r)}`);
+    lines.push([r.seriesOverallRank, csvEscape(r.boatName), csvEscape(r.skipper), csvEscape(r.className), formatTotal(r)].join(","));
   });
 
   // Top N per class
@@ -1130,31 +1159,46 @@ function exportSeriesCSVWithSummary(
       .filter((r) => r.className === cls && r.seriesClassRank != null && r.seriesClassRank <= topN)
       .sort((a, b) => a.seriesClassRank! - b.seriesClassRank!);
     lines.push(`\nTop ${topN} — ${cls}`);
-    lines.push("Rank,Boat,Total");
+    lines.push("Rank,Boat,Skipper,Total");
     classBoats.forEach((r) => {
-      lines.push(`${r.seriesClassRank},${r.boatName},${formatTotal(r)}`);
+      lines.push([r.seriesClassRank, csvEscape(r.boatName), csvEscape(r.skipper), formatTotal(r)].join(","));
     });
   });
 
   // Full results
   lines.push("");
   lines.push("Full Results");
-  const raceHeaders = races.map((r) => `${r.name} Rank`).join(",");
-  lines.push(`Series Rank,Class Rank,Boat,Sail #,Class,Total,${raceHeaders}`);
+  const raceRankHeaders = races.map((r) => `${csvEscape(r.name)} Rank`).join(",");
+  const raceETHeaders = races.map((r) => `${csvEscape(r.name)} ET`).join(",");
+  const raceCTHeaders = races.map((r) => `${csvEscape(r.name)} CT`).join(",");
+  const customHeaders = customCols.map((c) => csvEscape(c)).join(",");
+  let header = `Series Rank,Class Rank,Boat,Sail #,Skipper,Class,Total,${raceRankHeaders},${raceETHeaders},${raceCTHeaders}`;
+  if (customCols.length > 0) header += `,${customHeaders}`;
+  lines.push(header);
+
   results.forEach((r) => {
     const raceRanks = r.raceResults.map((rr) => {
       const rank = rr.overallRank ?? "—";
       return rr.dropped ? `(${rank})` : String(rank);
     }).join(",");
-    lines.push([
+    const raceETs = r.raceResults.map((rr) => formatElapsed(rr.elapsedMs)).join(",");
+    const raceCTs = r.raceResults.map((rr) => formatElapsed(rr.correctedMs)).join(",");
+    const customValues = customCols.map((c) => csvEscape(r.customFields[c] || "")).join(",");
+
+    let row = [
       r.seriesOverallRank ?? "—",
       r.seriesClassRank ?? "—",
-      r.boatName,
-      r.sailNumber,
-      r.className,
+      csvEscape(r.boatName),
+      csvEscape(r.sailNumber),
+      csvEscape(r.skipper),
+      csvEscape(r.className),
       formatTotal(r),
       raceRanks,
-    ].join(","));
+      raceETs,
+      raceCTs,
+    ].join(",");
+    if (customCols.length > 0) row += `,${customValues}`;
+    lines.push(row);
   });
 
   return lines.join("\n");

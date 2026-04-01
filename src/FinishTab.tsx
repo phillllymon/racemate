@@ -70,6 +70,7 @@ function SearchResults({
   onStage,
   onAdjustFinish,
   onUnfinish,
+  onSetStatus,
 }: {
   query: string;
   boats: Boat[];
@@ -81,8 +82,10 @@ function SearchResults({
   onStage: (boatId: number) => void;
   onAdjustFinish: (boatId: number, delta: number) => void;
   onUnfinish: (boatId: number) => void;
+  onSetStatus: (boatId: number, status: string) => void;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
 
   const q = query.trim().toLowerCase();
   const results = raceBoats.filter((rb) => {
@@ -113,34 +116,70 @@ function SearchResults({
         const boat = boats.find((b) => b.id === rb.boatId);
         const alreadyStaged = stagedIds.has(rb.boatId);
         const alreadyFinished = rb.finishTime != null;
+        const isDnfDns = rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ" || rb.status === "OCS";
         const isEditing = editingId === rb.boatId;
+        const showMenu = menuOpenId === rb.boatId;
 
         return (
           <div key={rb.boatId} className="finish-search-entry">
-            <button
-              className={`finish-search-item ${alreadyStaged ? "finish-search-item--staged" : ""} ${alreadyFinished ? "finish-search-item--finished" : ""}`}
-              onClick={() => {
-                if (alreadyFinished) {
-                  setEditingId(isEditing ? null : rb.boatId);
-                } else if (!alreadyStaged) {
-                  onStage(rb.boatId);
-                }
-              }}
-            >
-              <div className="finish-search-item-info">
-                <span className="checkin-boat-name">{boat?.name || `#${rb.boatId}`}</span>
-                {boat?.info.sailNumber && (
-                  <span className="checkin-boat-sail">{boat.info.sailNumber}</span>
-                )}
-                <span className="checkin-boat-class">{rb.class}</span>
-              </div>
-              <span className="finish-search-item-status">
-                {alreadyFinished
-                  ? formatFinishTime(rb.finishTime as number, finishTimeDisplay, rb.class, starts)
-                  : alreadyStaged ? "Staged" : rb.status}
-              </span>
-            </button>
+            <div className={`finish-search-item ${alreadyStaged ? "finish-search-item--staged" : ""} ${alreadyFinished ? "finish-search-item--finished" : ""} ${isDnfDns ? "finish-search-item--dnf" : ""}`}>
+              <button
+                className="finish-search-item-main"
+                onClick={() => {
+                  if (alreadyFinished || isDnfDns) {
+                    setEditingId(isEditing ? null : rb.boatId);
+                    setMenuOpenId(null);
+                  } else if (!alreadyStaged) {
+                    onStage(rb.boatId);
+                  }
+                }}
+              >
+                <div className="finish-search-item-info">
+                  <span className="checkin-boat-name">{boat?.name || `#${rb.boatId}`}</span>
+                  {boat?.info.sailNumber && (
+                    <span className="checkin-boat-sail">{boat.info.sailNumber}</span>
+                  )}
+                  <span className="checkin-boat-class">{rb.class}</span>
+                </div>
+                <span className="finish-search-item-status">
+                  {alreadyFinished
+                    ? formatFinishTime(rb.finishTime as number, finishTimeDisplay, rb.class, starts)
+                    : alreadyStaged ? "Staged" : rb.status}
+                </span>
+              </button>
+              <button
+                className="finish-search-item-dots"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpenId(showMenu ? null : rb.boatId);
+                  setEditingId(null);
+                }}
+              >
+                ⋮
+              </button>
+            </div>
 
+            {/* Status dropdown menu */}
+            {showMenu && (
+              <div className="finish-status-menu">
+                {rb.status !== "racing" && (
+                  <button className="finish-status-menu-item" onClick={() => { onSetStatus(rb.boatId, "racing"); setMenuOpenId(null); }}>
+                    Racing
+                  </button>
+                )}
+                <button className="finish-status-menu-item finish-status-menu-item--danger" onClick={() => { onSetStatus(rb.boatId, "DNF"); setMenuOpenId(null); }}>
+                  DNF
+                </button>
+                <button className="finish-status-menu-item finish-status-menu-item--danger" onClick={() => { onSetStatus(rb.boatId, "DNS"); setMenuOpenId(null); }}>
+                  DNS
+                </button>
+                <button className="finish-status-menu-item finish-status-menu-item--danger" onClick={() => { onSetStatus(rb.boatId, "DSQ"); setMenuOpenId(null); }}>
+                  DSQ
+                </button>
+              </div>
+            )}
+
+            {/* Edit row for finished boats */}
             {isEditing && alreadyFinished && (
               <div className="finish-edit-row">
                 <div className="staged-time-display">
@@ -153,6 +192,19 @@ function SearchResults({
                   onClick={() => { onUnfinish(rb.boatId); setEditingId(null); }}
                 >
                   Unfinish
+                </button>
+              </div>
+            )}
+
+            {/* Edit row for DNF/DNS/DSQ boats */}
+            {isEditing && isDnfDns && (
+              <div className="finish-edit-row">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ width: "auto", padding: "0 1rem" }}
+                  onClick={() => { onSetStatus(rb.boatId, "racing"); setEditingId(null); }}
+                >
+                  Back to Racing
                 </button>
               </div>
             )}
@@ -599,6 +651,13 @@ export default function FinishTab() {
         }}
         onUnfinish={(boatId) => {
           saveFinishTime(boatId, null);
+        }}
+        onSetStatus={(boatId, status) => {
+          const updatedBoats = raceBoats.map((b) => {
+            if (b.boatId !== boatId) return b;
+            return { ...b, status, finishTime: null };
+          });
+          updateRaceData(selectedRace.id, selectedRace.name, { ...selectedRace.info, boats: updatedBoats });
         }}
       />
 

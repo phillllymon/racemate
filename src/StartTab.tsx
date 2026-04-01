@@ -11,14 +11,14 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function formatCountdown(ms: number): { text: string; dayPlus: boolean } {
+function formatCountdown(ms: number): { text: string; days: number } {
   const neg = ms < 0;
   const abs = Math.abs(ms);
   const totalSec = Math.floor(abs / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
-  const dayPlus = h >= 24;
+  const days = Math.floor(h / 24);
   const displayH = h % 24;
 
   let str: string;
@@ -27,7 +27,7 @@ function formatCountdown(ms: number): { text: string; dayPlus: boolean } {
   } else {
     str = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
-  return { text: neg ? `+${str}` : str, dayPlus: !neg && dayPlus };
+  return { text: neg ? `+${str}` : str, days };
 }
 
 function formatAbsoluteTime(ms: number): string {
@@ -657,7 +657,17 @@ function StartCard({
   const [showBoats, setShowBoats] = useState(false);
   const [boatSearch, setBoatSearch] = useState("");
   const [dismissedNotifications, setDismissedNotifications] = useState<Set<number>>(new Set());
-  const [ocsComplete, setOcsComplete] = useState(false);
+  const [ocsComplete, setOcsComplete] = useState(() => {
+    // Default to true if the start already happened and all boats are accounted for
+    if (start.startTime != null && Date.now() >= start.startTime) {
+      const boatsInThisStart = raceBoats.filter((rb) => start.classes.includes(rb.class));
+      const allDone = boatsInThisStart.length > 0 && boatsInThisStart.every(
+        (rb) => rb.status === "racing" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ" || rb.status === "finished"
+      );
+      return allDone;
+    }
+    return false;
+  });
   const [editingStart, setEditingStart] = useState(false);
   const [editName, setEditName] = useState<string>("");
   const [editClasses, setEditClasses] = useState<string[]>(start.classes);
@@ -739,7 +749,7 @@ function StartCard({
   const boatsInStart = raceBoats.filter((rb) => start.classes.includes(rb.class));
   const hasOverEarly = boatsInStart.some((rb) => rb.status === "over-early");
   const allAccountedFor = boatsInStart.length > 0 && boatsInStart.every(
-    (rb) => rb.status === "racing" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ"
+    (rb) => rb.status === "racing" || rb.status === "finished" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ"
   );
   const phase: "countdown" | "starting" | "racing" = hasStarted
     ? ((allAccountedFor && !hasOverEarly && ocsComplete) ? "racing" : "starting")
@@ -789,7 +799,7 @@ function StartCard({
               const cd = formatCountdown(timeUntilStart!);
               return (
                 <span className={`start-countdown ${hasStarted ? "start-countdown--elapsed" : ""}`}>
-                  {cd.dayPlus && <span className="start-countdown-day">+1d </span>}
+                  {cd.days > 0 && <span className="start-countdown-day">{hasStarted ? "+" : ""}{cd.days}d </span>}
                   {cd.text}
                 </span>
               );
@@ -889,7 +899,10 @@ function StartCard({
           )}
 
           {phase === "racing" && (
-            <div className="post-start-clear">Racing</div>
+            <button className="post-start-racing-btn" onClick={() => setOcsComplete(false)}>
+              <span className="post-start-racing-label">Racing</span>
+              <span className="post-start-racing-hint">tap to re-open OCS check</span>
+            </button>
           )}
 
           {/* Recall button */}
