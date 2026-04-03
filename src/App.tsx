@@ -24,7 +24,7 @@ function MainApp() {
             <span className="desktop-brand-race">race</span>
             <span className="desktop-brand-mate">mate</span>
           </div>
-          <p className="desktop-tagline">Sailboat race management</p>
+          <p className="desktop-tagline">Race Committee Console</p>
         </div>
         <div className="app-shell">
         <TopBar
@@ -68,7 +68,7 @@ function AppContent() {
           <span className="desktop-brand-race">race</span>
           <span className="desktop-brand-mate">mate</span>
         </div>
-        <p className="desktop-tagline">Sailboat race management</p>
+        <p className="desktop-tagline">Race Committee Console</p>
       </div>
       <div className="app-shell">
         <LoginPage />

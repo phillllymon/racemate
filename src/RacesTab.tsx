@@ -597,7 +597,7 @@ function AddBoatForm({
 
       <div className="races-form-actions">
         <button className="btn btn-primary" onClick={submitNew} disabled={busy || !name.trim()}>
-          {busy ? "..." : "Add Boat"}
+          {busy ? "..." : "Save Boat"}
         </button>
         <button className="btn btn-secondary" onClick={() => setMode("choose")}>Back</button>
       </div>
