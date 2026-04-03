@@ -74,15 +74,31 @@ const plainPassword = "userPassword123";
 //   });
 // });
 
-fetch("https://racematevercel.vercel.app/api/deleteBoat",  {
+// fetch("https://racematevercel.vercel.app/api/deleteBoat",  {
+//   method: "POST",
+//   headers: {
+//     "Content-Type": "application/json"
+//   },
+//   body: JSON.stringify({
+//     userId: "6c990ce3-1ceb-44c5-9bdb-007c029081d2",
+//     token: "mjwd8xkthz58ghvk6lzy",
+//     boatId: "17"
+//   })
+// }).then((res) => {
+//   res.json().then((r) => {
+//     console.log(r);
+//   });
+// });
+
+fetch("https://racematevercel.vercel.app/api/getClubMembers",  {
   method: "POST",
   headers: {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
     userId: "6c990ce3-1ceb-44c5-9bdb-007c029081d2",
-    token: "mjwd8xkthz58ghvk6lzy",
-    boatId: "17"
+    token: "fp3qt54jd8wkhq9b0q6f",
+    clubId: "1"
   })
 }).then((res) => {
   res.json().then((r) => {

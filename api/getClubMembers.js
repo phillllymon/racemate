@@ -30,19 +30,38 @@ module.exports.default = async function handler(req, res) {
                 if (users.length === 1) {
                     bcrypt.compare(token, users[0]["login_token"]).then((tokenMatch) => {
                         if (tokenMatch) {
-                            sql`
-                                SELECT cm.id, cm.club_id, cm.user_id, cm.role, cm.info,
-                                       u.name as user_name, u.email as user_email
-                                FROM club_members cm
-                                INNER JOIN users u ON cm.user_id = u.id
-                                WHERE cm.club_id = ${clubId}
-                                ORDER BY u.name ASC
-                            `.then((members) => {
-                                res.writeHead(200, { "Content-Type": "application/json" });
-                                res.end(JSON.stringify({
-                                    message: "members retrieved",
-                                    members: members
-                                }));
+                            // Step 1: get club members
+                            sql`SELECT * FROM club_members WHERE club_id = ${clubId}`.then((members) => {
+                                if (members.length === 0) {
+                                    res.writeHead(200, { "Content-Type": "application/json" });
+                                    res.end(JSON.stringify({
+                                        message: "members retrieved",
+                                        members: []
+                                    }));
+                                    return;
+                                }
+
+                                // Step 2: get user info for each member
+                                const memberUserIds = members.map(m => m.user_id);
+                                sql`SELECT id, name, email FROM users WHERE id = ANY(${memberUserIds})`.then((memberUsers) => {
+                                    const enriched = members.map(m => {
+                                        const u = memberUsers.find(u => u.id === m.user_id);
+                                        return {
+                                            id: m.id,
+                                            club_id: m.club_id,
+                                            user_id: m.user_id,
+                                            role: m.role,
+                                            info: m.info,
+                                            user_name: u ? u.name : null,
+                                            user_email: u ? u.email : null
+                                        };
+                                    });
+                                    res.writeHead(200, { "Content-Type": "application/json" });
+                                    res.end(JSON.stringify({
+                                        message: "members retrieved",
+                                        members: enriched
+                                    }));
+                                });
                             });
                         } else {
                             res.writeHead(200, { "Content-Type": "application/json" });
