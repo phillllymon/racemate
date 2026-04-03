@@ -31,6 +31,13 @@ const deleteBoatHandler = require("./api/deleteBoat.js").default;
 const deleteRaceHandler = require("./api/deleteRace.js").default;
 const deleteSeriesHandler = require("./api/deleteSeries.js").default;
 
+const createClubHandler = require("./api/createClub.js").default;
+const getAllClubsHandler = require("./api/getAllClubs.js").default;
+const getClubMembersHandler = require("./api/getClubMembers.js").default;
+const getMyClubsHandler = require("./api/getMyClubs.js").default;
+const joinClubHandler = require("./api/joinClub.js").default;
+const leaveClubHandler = require("./api/leaveClub.js").default; 
+
 const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
         if (req.url === "/api/hello.js") return helloHandler(req, res);
@@ -54,6 +61,12 @@ const server = http.createServer((req, res) => {
         if (req.url === "/api/deleteBoat") return deleteBoatHandler(req, res);
         if (req.url === "/api/deleteRace") return deleteRaceHandler(req, res);
         if (req.url === "/api/deleteSeries") return deleteSeriesHandler(req, res);
+        if (req.url === "/api/createClub") return createClubHandler(req, res);
+        if (req.url === "/api/getAllClubs") return getAllClubsHandler(req, res);
+        if (req.url === "/api/getClubMembers") return getClubMembersHandler(req, res);
+        if (req.url === "/api/getMyClubs") return getMyClubsHandler(req, res);
+        if (req.url === "/api/joinClub") return joinClubHandler(req, res);
+        if (req.url === "/api/leaveClub") return leaveClubHandler(req, res);
 
         res.writeHead(404);
         return res.end("API route not found");
