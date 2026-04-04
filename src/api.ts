@@ -71,6 +71,8 @@ export interface RaceInfo {
   boats?: RaceBoatEntry[];
   starts?: StartInfo[];
   scoringMethod?: string;
+  pro?: string; // userId of principal race officer
+  assistants?: string[]; // userIds of assistant officers
   [key: string]: unknown;
 }
 
@@ -296,5 +298,100 @@ export async function deleteSeries(
     userId: auth.userId,
     token: auth.token,
     seriesId: String(seriesId),
+  });
+}
+
+// ---- Clubs ----
+
+export interface ClubRecord {
+  id: number;
+  name: string;
+  info: string;
+  owner: string;
+  member_role?: string; // present on getMyClubs results
+}
+
+export interface ClubMember {
+  id: number;
+  club_id: number;
+  user_id: string;
+  role: string;
+  info: string;
+  user_name: string | null;
+  user_email: string | null;
+}
+
+export async function createClub(
+  auth: AuthParams,
+  clubName: string,
+  clubInfo: Record<string, unknown> = {}
+): Promise<{ message: string; club: ClubRecord[] }> {
+  return post("createClub", {
+    userId: auth.userId,
+    token: auth.token,
+    clubName,
+    clubInfo,
+  });
+}
+
+export async function getAllClubs(
+  auth: AuthParams
+): Promise<{ message: string; clubs: ClubRecord[] }> {
+  return post("getAllClubs", {
+    userId: auth.userId,
+    token: auth.token,
+  });
+}
+
+export async function getMyClubs(
+  auth: AuthParams
+): Promise<{ message: string; clubs: ClubRecord[] }> {
+  return post("getMyClubs", {
+    userId: auth.userId,
+    token: auth.token,
+  });
+}
+
+export async function getClubMembers(
+  auth: AuthParams,
+  clubId: number
+): Promise<{ message: string; members: ClubMember[] }> {
+  return post("getClubMembers", {
+    userId: auth.userId,
+    token: auth.token,
+    clubId,
+  });
+}
+
+export async function joinClub(
+  auth: AuthParams,
+  clubId: number
+): Promise<{ message: string }> {
+  return post("joinClub", {
+    userId: auth.userId,
+    token: auth.token,
+    clubId,
+  });
+}
+
+export async function leaveClub(
+  auth: AuthParams,
+  clubId: number
+): Promise<{ message: string }> {
+  return post("leaveClub", {
+    userId: auth.userId,
+    token: auth.token,
+    clubId,
+  });
+}
+
+// ---- Assistant races ----
+
+export async function getAssistantRaces(
+  auth: AuthParams
+): Promise<{ message: string; races: RaceRecord[]; series: SeriesRecord[] }> {
+  return post("getAssistantRaces", {
+    userId: auth.userId,
+    token: auth.token,
   });
 }

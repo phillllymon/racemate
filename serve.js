@@ -36,7 +36,9 @@ const getAllClubsHandler = require("./api/getAllClubs.js").default;
 const getClubMembersHandler = require("./api/getClubMembers.js").default;
 const getMyClubsHandler = require("./api/getMyClubs.js").default;
 const joinClubHandler = require("./api/joinClub.js").default;
-const leaveClubHandler = require("./api/leaveClub.js").default; 
+const leaveClubHandler = require("./api/leaveClub.js").default;
+
+const getAssistantRacesHandler = require("./api/getAssistantRaces.js").default;
 
 const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
@@ -67,6 +69,7 @@ const server = http.createServer((req, res) => {
         if (req.url === "/api/getMyClubs") return getMyClubsHandler(req, res);
         if (req.url === "/api/joinClub") return joinClubHandler(req, res);
         if (req.url === "/api/leaveClub") return leaveClubHandler(req, res);
+        if (req.url === "/api/getAssistantRaces") return getAssistantRacesHandler(req, res);
 
         res.writeHead(404);
         return res.end("API route not found");

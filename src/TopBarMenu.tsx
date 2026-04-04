@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "./AuthContext";
+import ClubsModal from "./ClubsModal";
 
 type Theme = "dark" | "light" | "highcontrast";
 
@@ -25,6 +26,7 @@ export default function TopBarMenu() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [clubsOpen, setClubsOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getStoredTheme);
   const [finishDisplay, setFinishDisplay] = useState<"clock" | "elapsed">(
     (localStorage.getItem("racemate-finish-display") as "clock" | "elapsed") || "clock"
@@ -77,6 +79,12 @@ export default function TopBarMenu() {
             onClick={() => { setOpen(false); setSettingsOpen(true); }}
           >
             Settings
+          </button>
+          <button
+            className="topbar-menu-item"
+            onClick={() => { setOpen(false); setClubsOpen(true); }}
+          >
+            Clubs
           </button>
           <button
             className="topbar-menu-item topbar-menu-item--danger"
@@ -149,6 +157,7 @@ export default function TopBarMenu() {
         </div>,
         document.body
       )}
+      <ClubsModal open={clubsOpen} onClose={() => setClubsOpen(false)} />
     </div>
   );
 }

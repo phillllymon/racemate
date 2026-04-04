@@ -5,6 +5,7 @@ import {
   addRace, updateRace, getRacesByColumn, deleteRace,
   addSeries, updateSeries, getSeriesByColumn, deleteSeries,
   addBoat, updateBoat, getBoatsByColumn,
+  getAssistantRaces,
 } from "./api";
 import type {
   RaceRecord, SeriesRecord, BoatRecord,
@@ -136,13 +137,29 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     if (!auth) return;
     setLoading(true);
     try {
-      const [seriesRes, racesRes, boatsRes] = await Promise.all([
+      const [seriesRes, racesRes, boatsRes, assistantRes] = await Promise.all([
         getSeriesByColumn(auth, "owner", auth.userId),
         getRacesByColumn(auth, "owner", auth.userId),
         getBoatsByColumn(auth, "owner", auth.userId),
+        getAssistantRaces(auth).catch(() => ({ races: [], series: [] })),
       ]);
-      setSeries(seriesRes.results.map((r: SeriesRecord) => parseRecord<SeriesInfo>(r)));
-      setRaces(racesRes.results.map((r: RaceRecord) => parseRecord<RaceInfo>(r)));
+
+      // Merge owned and assistant races/series, deduplicating by id
+      const ownedRaces = racesRes.results.map((r: RaceRecord) => parseRecord<RaceInfo>(r));
+      const assistRaces = (assistantRes.races || []).map((r: RaceRecord) => parseRecord<RaceInfo>(r));
+      const ownedSeries = seriesRes.results.map((r: SeriesRecord) => parseRecord<SeriesInfo>(r));
+      const assistSeries = (assistantRes.series || []).map((r: SeriesRecord) => parseRecord<SeriesInfo>(r));
+
+      const raceMap = new Map<number, Race>();
+      ownedRaces.forEach((r) => raceMap.set(r.id, r));
+      assistRaces.forEach((r) => { if (!raceMap.has(r.id)) raceMap.set(r.id, r); });
+
+      const seriesMap = new Map<number, Series>();
+      ownedSeries.forEach((s) => seriesMap.set(s.id, s));
+      assistSeries.forEach((s) => { if (!seriesMap.has(s.id)) seriesMap.set(s.id, s); });
+
+      setRaces(Array.from(raceMap.values()));
+      setSeries(Array.from(seriesMap.values()));
       setBoats(boatsRes.results.map((r: BoatRecord) => parseRecord<BoatInfo>(r)));
     } catch (_e) {
       // Keep existing state on error

@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRaces } from "./RaceContext";
+import { useAuth } from "./AuthContext";
 import { useTime } from "./TimeContext";
 import type { Race, Series, Boat } from "./RaceContext";
-import type { BoatInfo, RaceBoatEntry, RaceInfo } from "./api";
+import type { BoatInfo, RaceBoatEntry, RaceInfo, ClubMember } from "./api";
+import { getMyClubs, getClubMembers } from "./api";
 import SpreadsheetImport from "./SpreadsheetImport";
 
 // ---- Confirmation modal ----
@@ -739,6 +741,102 @@ function ClassSection({
   );
 }
 
+// ---- Assistant picker ----
+
+function AssistantPicker({
+  assistants,
+  onChange,
+}: {
+  assistants: string[];
+  onChange: (updated: string[]) => void;
+}) {
+  const { user, token } = useAuth();
+  const auth = user && token ? { userId: user.id, token } : null;
+  const [clubMembers, setClubMembers] = useState<ClubMember[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!auth || loaded) return;
+    setLoaded(true);
+    // Fetch all club members across all user's clubs
+    getMyClubs(auth).then((res) => {
+      const clubs = res.clubs || [];
+      Promise.all(clubs.map((c) => getClubMembers(auth, c.id))).then((results) => {
+        const allMembers: ClubMember[] = [];
+        const seen = new Set<string>();
+        results.forEach((r) => {
+          (r.members || []).forEach((m) => {
+            if (!seen.has(m.user_id) && m.user_id !== user!.id) {
+              seen.add(m.user_id);
+              allMembers.push(m);
+            }
+          });
+        });
+        setClubMembers(allMembers);
+      });
+    });
+  }, [auth?.userId]);
+
+  const toggle = (userId: string) => {
+    if (assistants.includes(userId)) {
+      onChange(assistants.filter((id) => id !== userId));
+    } else {
+      onChange([...assistants, userId]);
+    }
+  };
+
+  const getAssistantName = (userId: string): string => {
+    const m = clubMembers.find((m) => m.user_id === userId);
+    return m?.user_name || userId.slice(0, 8) + "...";
+  };
+
+  return (
+    <div className="assistant-picker">
+      <div className="start-classes-label">Assistant Officers:</div>
+      {assistants.length > 0 && (
+        <div className="assistant-list">
+          {assistants.map((id) => (
+            <div key={id} className="assistant-chip">
+              <span>{getAssistantName(id)}</span>
+              <button className="assistant-chip-remove" onClick={() => toggle(id)}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {clubMembers.length > 0 ? (
+        <>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => setPickerOpen(!pickerOpen)}
+          >
+            {pickerOpen ? "Done" : "+ Add Assistant"}
+          </button>
+          {pickerOpen && (
+            <div className="assistant-member-list">
+              {clubMembers.map((m) => {
+                const isSelected = assistants.includes(m.user_id);
+                return (
+                  <button
+                    key={m.user_id}
+                    className={`assistant-member-row ${isSelected ? "assistant-member-row--selected" : ""}`}
+                    onClick={() => toggle(m.user_id)}
+                  >
+                    <span className="assistant-member-name">{m.user_name || "Unknown"}</span>
+                    <span className="assistant-member-check">{isSelected ? "✓" : ""}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="assistant-empty">Join a club to add assistants</div>
+      )}
+    </div>
+  );
+}
+
 // ---- Race card ----
 
 function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
@@ -756,6 +854,7 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   const [editWind, setEditWind] = useState<string>((race.info.windCondition as string) || "medium");
   const [editCourseLength, setEditCourseLength] = useState(race.info.courseLength != null ? String(race.info.courseLength) : "");
   const [editNotes, setEditNotes] = useState((race.info.notes as string) || "");
+  const [editAssistants, setEditAssistants] = useState<string[]>(race.info.assistants || []);
   const isSelected = selectedRaceId === race.id;
   const raceBoats = race.info.boats || [];
 
@@ -789,6 +888,7 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
       windCondition: editWind,
       courseLength: editCourseLength.trim() ? Number(editCourseLength) : undefined,
       notes: editNotes.trim() || undefined,
+      assistants: editAssistants,
     });
     setEditingRace(false);
   };
@@ -799,6 +899,7 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
     setEditWind((race.info.windCondition as string) || "medium");
     setEditCourseLength(race.info.courseLength != null ? String(race.info.courseLength) : "");
     setEditNotes((race.info.notes as string) || "");
+    setEditAssistants(race.info.assistants || []);
     setEditingRace(true);
   };
 
@@ -887,6 +988,11 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
                 placeholder="Notes — optional"
                 value={editNotes}
                 onChange={(e) => setEditNotes(e.target.value)}
+              />
+
+              <AssistantPicker
+                assistants={editAssistants}
+                onChange={setEditAssistants}
               />
 
               <div className="races-form-actions">
@@ -988,12 +1094,13 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
 // ---- Series card ----
 
 function SeriesCard({ s }: { s: Series }) {
-  const { races, selectRace, updateSeriesData, removeSeries } = useRaces();
+  const { races, selectRace, updateSeriesData, updateRaceData, removeSeries } = useRaces();
   const [expanded, setExpanded] = useState(false);
   const [addingRace, setAddingRace] = useState(false);
   const [editingSeries, setEditingSeries] = useState(false);
   const [editName, setEditName] = useState(s.name);
   const [confirmDeleteSeries, setConfirmDeleteSeries] = useState(false);
+  const [seriesAssistants, setSeriesAssistants] = useState<string[]>([]);
 
   const seriesRaces = s.info.raceIds
     .map((id) => races.find((r) => r.id === id))
@@ -1002,11 +1109,20 @@ function SeriesCard({ s }: { s: Series }) {
   const saveSeriesEdit = () => {
     const newName = editName.trim() || s.name;
     updateSeriesData(s.id, newName, { ...s.info, name: newName });
+    // Apply assistants to all races in the series
+    if (seriesAssistants.length > 0 || seriesRaces.some((r) => (r.info.assistants || []).length > 0)) {
+      seriesRaces.forEach((race) => {
+        updateRaceData(race.id, race.name, { ...race.info, assistants: seriesAssistants });
+      });
+    }
     setEditingSeries(false);
   };
 
   const startEditingSeries = () => {
     setEditName(s.name);
+    // Initialize from first race's assistants, or empty
+    const firstRace = seriesRaces[0];
+    setSeriesAssistants(firstRace?.info.assistants || []);
     setEditingSeries(true);
   };
 
@@ -1043,6 +1159,13 @@ function SeriesCard({ s }: { s: Series }) {
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
               />
+
+              <AssistantPicker
+                assistants={seriesAssistants}
+                onChange={setSeriesAssistants}
+              />
+              <div className="assistant-series-note">Assistants will be applied to all {seriesRaces.length} race{seriesRaces.length !== 1 ? "s" : ""} in this series.</div>
+
               <div className="races-form-actions">
                 <button className="btn btn-primary" onClick={saveSeriesEdit}>Save</button>
                 <button className="btn btn-secondary" onClick={() => setEditingSeries(false)}>Cancel</button>
