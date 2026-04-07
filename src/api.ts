@@ -65,14 +65,24 @@ export interface RaceBoatEntry {
   [key: string]: unknown;
 }
 
+export interface AssistantPermissions {
+  checkIn?: boolean;
+  finish?: boolean;
+  setDnf?: boolean;
+  viewResults?: boolean;
+}
+
 export interface RaceInfo {
   name: string;
   autoCheckIn?: boolean;
   boats?: RaceBoatEntry[];
   starts?: StartInfo[];
   scoringMethod?: string;
-  pro?: string; // userId of principal race officer
-  assistants?: string[]; // userIds of assistant officers
+  pro?: string;
+  assistants?: string[];
+  customAssistants?: boolean;
+  assistantPermissions?: AssistantPermissions;
+  customPermissions?: boolean;
   [key: string]: unknown;
 }
 
@@ -94,6 +104,8 @@ export interface SeriesInfo {
   raceIds: number[];
   scoringMethod?: string;
   drops?: number;
+  assistants?: string[];
+  assistantPermissions?: AssistantPermissions;
   [key: string]: unknown;
 }
 

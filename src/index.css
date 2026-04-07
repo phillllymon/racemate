@@ -3725,3 +3725,28 @@ body {
   color: var(--text-muted);
   font-style: italic;
 }
+
+.assistant-chip--inherited {
+  background: rgba(255 255 255 / 0.05);
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+/* ---- Permissions picker ---- */
+
+.permissions-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.permissions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.races-checkbox--disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}

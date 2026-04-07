@@ -4,7 +4,7 @@ import { useRaces } from "./RaceContext";
 import { useAuth } from "./AuthContext";
 import { useTime } from "./TimeContext";
 import type { Race, Series, Boat } from "./RaceContext";
-import type { BoatInfo, RaceBoatEntry, RaceInfo, ClubMember } from "./api";
+import type { BoatInfo, RaceBoatEntry, RaceInfo, ClubMember, AssistantPermissions } from "./api";
 import { getMyClubs, getClubMembers } from "./api";
 import SpreadsheetImport from "./SpreadsheetImport";
 
@@ -746,9 +746,15 @@ function ClassSection({
 function AssistantPicker({
   assistants,
   onChange,
+  seriesAssistants,
+  useCustom,
+  onToggleCustom,
 }: {
   assistants: string[];
   onChange: (updated: string[]) => void;
+  seriesAssistants?: string[]; // if provided, shows inherit/override toggle
+  useCustom?: boolean;
+  onToggleCustom?: (custom: boolean) => void;
 }) {
   const { user, token } = useAuth();
   const auth = user && token ? { userId: user.id, token } : null;
@@ -759,7 +765,6 @@ function AssistantPicker({
   useEffect(() => {
     if (!auth || loaded) return;
     setLoaded(true);
-    // Fetch all club members across all user's clubs
     getMyClubs(auth).then((res) => {
       const clubs = res.clubs || [];
       Promise.all(clubs.map((c) => getClubMembers(auth, c.id))).then((results) => {
@@ -786,25 +791,61 @@ function AssistantPicker({
     }
   };
 
-  const getAssistantName = (userId: string): string => {
+  const getNameForId = (userId: string): string => {
     const m = clubMembers.find((m) => m.user_id === userId);
     return m?.user_name || userId.slice(0, 8) + "...";
   };
 
+  // Race-level: show inherit/override
+  const hasSeriesLevel = seriesAssistants != null && onToggleCustom != null;
+  const isInheriting = hasSeriesLevel && !useCustom;
+  const displayAssistants = isInheriting ? (seriesAssistants || []) : assistants;
+
   return (
     <div className="assistant-picker">
       <div className="start-classes-label">Assistant Officers:</div>
-      {assistants.length > 0 && (
+
+      {hasSeriesLevel && (
+        <div className="start-mode-toggle">
+          <button
+            className={`start-mode-btn ${!useCustom ? "start-mode-btn--active" : ""}`}
+            onClick={() => onToggleCustom!(false)}
+          >
+            From Series
+          </button>
+          <button
+            className={`start-mode-btn ${useCustom ? "start-mode-btn--active" : ""}`}
+            onClick={() => {
+              onToggleCustom!(true);
+              // Copy series assistants as starting point for custom
+              if (!useCustom) onChange([...(seriesAssistants || [])]);
+            }}
+          >
+            Custom
+          </button>
+        </div>
+      )}
+
+      {displayAssistants.length > 0 && (
         <div className="assistant-list">
-          {assistants.map((id) => (
-            <div key={id} className="assistant-chip">
-              <span>{getAssistantName(id)}</span>
-              <button className="assistant-chip-remove" onClick={() => toggle(id)}>×</button>
+          {displayAssistants.map((id) => (
+            <div key={id} className={`assistant-chip ${isInheriting ? "assistant-chip--inherited" : ""}`}>
+              <span>{getNameForId(id)}</span>
+              {!isInheriting && (
+                <button className="assistant-chip-remove" onClick={() => toggle(id)}>×</button>
+              )}
             </div>
           ))}
         </div>
       )}
-      {clubMembers.length > 0 ? (
+
+      {displayAssistants.length === 0 && (
+        <div className="assistant-empty">
+          {isInheriting ? "No assistants set on series" : "No assistants"}
+        </div>
+      )}
+
+      {!isInheriting && clubMembers.length > 0 && (
         <>
           <button
             className="btn btn-secondary btn-sm"
@@ -830,16 +871,96 @@ function AssistantPicker({
             </div>
           )}
         </>
-      ) : (
+      )}
+
+      {!isInheriting && clubMembers.length === 0 && loaded && (
         <div className="assistant-empty">Join a club to add assistants</div>
       )}
     </div>
   );
 }
 
+// ---- Permissions picker ----
+
+const DEFAULT_PERMISSIONS: AssistantPermissions = {
+  checkIn: true,
+  finish: true,
+  setDnf: true,
+  viewResults: true,
+};
+
+const PERMISSION_LABELS: Array<{ key: keyof AssistantPermissions; label: string }> = [
+  { key: "checkIn", label: "Check in boats" },
+  { key: "finish", label: "Finish boats" },
+  { key: "setDnf", label: "Set DNF / DNS / DSQ" },
+  { key: "viewResults", label: "View results" },
+];
+
+function PermissionsPicker({
+  permissions,
+  onChange,
+  seriesPermissions,
+  useCustom,
+  onToggleCustom,
+}: {
+  permissions: AssistantPermissions;
+  onChange: (p: AssistantPermissions) => void;
+  seriesPermissions?: AssistantPermissions;
+  useCustom?: boolean;
+  onToggleCustom?: (custom: boolean) => void;
+}) {
+  const hasSeriesLevel = seriesPermissions != null && onToggleCustom != null;
+  const isInheriting = hasSeriesLevel && !useCustom;
+  const displayPerms = isInheriting ? (seriesPermissions || DEFAULT_PERMISSIONS) : permissions;
+
+  return (
+    <div className="permissions-picker">
+      <div className="start-classes-label">Assistant Permissions:</div>
+
+      {hasSeriesLevel && (
+        <div className="start-mode-toggle">
+          <button
+            className={`start-mode-btn ${!useCustom ? "start-mode-btn--active" : ""}`}
+            onClick={() => onToggleCustom!(false)}
+          >
+            From Series
+          </button>
+          <button
+            className={`start-mode-btn ${useCustom ? "start-mode-btn--active" : ""}`}
+            onClick={() => {
+              onToggleCustom!(true);
+              if (!useCustom) onChange({ ...(seriesPermissions || DEFAULT_PERMISSIONS) });
+            }}
+          >
+            Custom
+          </button>
+        </div>
+      )}
+
+      <div className="permissions-list">
+        {PERMISSION_LABELS.map(({ key, label }) => (
+          <label key={key} className={`races-checkbox ${isInheriting ? "races-checkbox--disabled" : ""}`}>
+            <input
+              type="checkbox"
+              checked={displayPerms[key] ?? true}
+              disabled={isInheriting}
+              onChange={(e) => {
+                if (!isInheriting) {
+                  onChange({ ...permissions, [key]: e.target.checked });
+                }
+              }}
+            />
+            <span>{label}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---- Race card ----
 
-function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
+function RaceCard({ race, onSelect, parentSeries }: { race: Race; onSelect: () => void; parentSeries?: Series }) {
   const { selectedRaceId, selectRace, updateRaceData, boats, removeRace } = useRaces();
   const [expanded, setExpanded] = useState(false);
   const [editingBoatId, setEditingBoatId] = useState<number | null>(null);
@@ -855,6 +976,9 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   const [editCourseLength, setEditCourseLength] = useState(race.info.courseLength != null ? String(race.info.courseLength) : "");
   const [editNotes, setEditNotes] = useState((race.info.notes as string) || "");
   const [editAssistants, setEditAssistants] = useState<string[]>(race.info.assistants || []);
+  const [useCustomAssistants, setUseCustomAssistants] = useState(!!race.info.customAssistants);
+  const [editPermissions, setEditPermissions] = useState<AssistantPermissions>(race.info.assistantPermissions || DEFAULT_PERMISSIONS);
+  const [useCustomPermissions, setUseCustomPermissions] = useState(!!race.info.customPermissions);
   const isSelected = selectedRaceId === race.id;
   const raceBoats = race.info.boats || [];
 
@@ -881,6 +1005,10 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
   };
 
   const saveRaceEdit = () => {
+    const seriesAssistants = parentSeries?.info.assistants || [];
+    const seriesPerms = parentSeries?.info.assistantPermissions || DEFAULT_PERMISSIONS;
+    const effectiveAssistants = useCustomAssistants ? editAssistants : seriesAssistants;
+    const effectivePermissions = useCustomPermissions ? editPermissions : seriesPerms;
     updateRaceData(race.id, editName.trim() || race.name, {
       ...race.info,
       name: editName.trim() || race.name,
@@ -888,7 +1016,10 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
       windCondition: editWind,
       courseLength: editCourseLength.trim() ? Number(editCourseLength) : undefined,
       notes: editNotes.trim() || undefined,
-      assistants: editAssistants,
+      assistants: effectiveAssistants,
+      customAssistants: useCustomAssistants || undefined,
+      assistantPermissions: effectivePermissions,
+      customPermissions: useCustomPermissions || undefined,
     });
     setEditingRace(false);
   };
@@ -900,6 +1031,9 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
     setEditCourseLength(race.info.courseLength != null ? String(race.info.courseLength) : "");
     setEditNotes((race.info.notes as string) || "");
     setEditAssistants(race.info.assistants || []);
+    setUseCustomAssistants(!!race.info.customAssistants);
+    setEditPermissions(race.info.assistantPermissions || DEFAULT_PERMISSIONS);
+    setUseCustomPermissions(!!race.info.customPermissions);
     setEditingRace(true);
   };
 
@@ -993,6 +1127,17 @@ function RaceCard({ race, onSelect }: { race: Race; onSelect: () => void }) {
               <AssistantPicker
                 assistants={editAssistants}
                 onChange={setEditAssistants}
+                seriesAssistants={parentSeries?.info.assistants}
+                useCustom={useCustomAssistants}
+                onToggleCustom={setUseCustomAssistants}
+              />
+
+              <PermissionsPicker
+                permissions={editPermissions}
+                onChange={setEditPermissions}
+                seriesPermissions={parentSeries?.info.assistantPermissions}
+                useCustom={useCustomPermissions}
+                onToggleCustom={setUseCustomPermissions}
               />
 
               <div className="races-form-actions">
@@ -1101,6 +1246,7 @@ function SeriesCard({ s }: { s: Series }) {
   const [editName, setEditName] = useState(s.name);
   const [confirmDeleteSeries, setConfirmDeleteSeries] = useState(false);
   const [seriesAssistants, setSeriesAssistants] = useState<string[]>([]);
+  const [seriesPermissions, setSeriesPermissions] = useState<AssistantPermissions>(DEFAULT_PERMISSIONS);
 
   const seriesRaces = s.info.raceIds
     .map((id) => races.find((r) => r.id === id))
@@ -1108,21 +1254,28 @@ function SeriesCard({ s }: { s: Series }) {
 
   const saveSeriesEdit = () => {
     const newName = editName.trim() || s.name;
-    updateSeriesData(s.id, newName, { ...s.info, name: newName });
-    // Apply assistants to all races in the series
-    if (seriesAssistants.length > 0 || seriesRaces.some((r) => (r.info.assistants || []).length > 0)) {
-      seriesRaces.forEach((race) => {
-        updateRaceData(race.id, race.name, { ...race.info, assistants: seriesAssistants });
-      });
-    }
+    updateSeriesData(s.id, newName, {
+      ...s.info,
+      name: newName,
+      assistants: seriesAssistants,
+      assistantPermissions: seriesPermissions,
+    });
+    // Also update any race that uses series-level settings
+    seriesRaces.forEach((race) => {
+      const updates: Partial<RaceInfo> = {};
+      if (!race.info.customAssistants) updates.assistants = seriesAssistants;
+      if (!race.info.customPermissions) updates.assistantPermissions = seriesPermissions;
+      if (Object.keys(updates).length > 0) {
+        updateRaceData(race.id, race.name, { ...race.info, ...updates });
+      }
+    });
     setEditingSeries(false);
   };
 
   const startEditingSeries = () => {
     setEditName(s.name);
-    // Initialize from first race's assistants, or empty
-    const firstRace = seriesRaces[0];
-    setSeriesAssistants(firstRace?.info.assistants || []);
+    setSeriesAssistants(s.info.assistants || []);
+    setSeriesPermissions(s.info.assistantPermissions || DEFAULT_PERMISSIONS);
     setEditingSeries(true);
   };
 
@@ -1164,7 +1317,12 @@ function SeriesCard({ s }: { s: Series }) {
                 assistants={seriesAssistants}
                 onChange={setSeriesAssistants}
               />
-              <div className="assistant-series-note">Assistants will be applied to all {seriesRaces.length} race{seriesRaces.length !== 1 ? "s" : ""} in this series.</div>
+              <div className="assistant-series-note">Applies to all races unless overridden per race.</div>
+
+              <PermissionsPicker
+                permissions={seriesPermissions}
+                onChange={setSeriesPermissions}
+              />
 
               <div className="races-form-actions">
                 <button className="btn btn-primary" onClick={saveSeriesEdit}>Save</button>
@@ -1188,7 +1346,7 @@ function SeriesCard({ s }: { s: Series }) {
           ) : (
             <>
               {seriesRaces.map((race) => (
-                <RaceCard key={race.id} race={race} onSelect={() => selectRace(race.id)} />
+                <RaceCard key={race.id} race={race} onSelect={() => selectRace(race.id)} parentSeries={s} />
               ))}
 
               {seriesRaces.length === 0 && !addingRace && (

@@ -39,6 +39,9 @@ const joinClubHandler = require("./api/joinClub.js").default;
 const leaveClubHandler = require("./api/leaveClub.js").default;
 
 const getAssistantRacesHandler = require("./api/getAssistantRaces.js").default;
+const addFinishObservationHandler = require("./api/addFinishObservation.js").default;
+const getFinishObservationsHandler = require("./api/getFinishObservations.js").default;
+const deleteFinishObservationHandler = require("./api/deleteFinishObservation.js").default;
 
 const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
@@ -70,6 +73,9 @@ const server = http.createServer((req, res) => {
         if (req.url === "/api/joinClub") return joinClubHandler(req, res);
         if (req.url === "/api/leaveClub") return leaveClubHandler(req, res);
         if (req.url === "/api/getAssistantRaces") return getAssistantRacesHandler(req, res);
+        if (req.url === "/api/addFinishObservation") return addFinishObservationHandler(req, res);
+        if (req.url === "/api/getFinishObservations") return getFinishObservationsHandler(req, res);
+        if (req.url === "/api/deleteFinishObservation") return deleteFinishObservationHandler(req, res);
 
         res.writeHead(404);
         return res.end("API route not found");
