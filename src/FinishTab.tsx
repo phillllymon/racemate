@@ -1,8 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useRaces } from "./RaceContext";
+import { useAuth } from "./AuthContext";
 import { useTime } from "./TimeContext";
 import type { Boat } from "./RaceContext";
-import type { RaceBoatEntry } from "./api";
+import type { RaceBoatEntry, FinishObservation } from "./api";
+import { addFinishObservation, getFinishObservations, deleteFinishObservation } from "./api";
 
 // ---- Types ----
 
@@ -64,9 +67,12 @@ function SearchResults({
   boats,
   raceBoats,
   stagedIds,
-  hideFinished,
+  hideFinishedByMe,
+  hideCertified,
   finishTimeDisplay,
   starts,
+  myObservations,
+  allObservations,
   onStage,
   onAdjustFinish,
   onUnfinish,
@@ -76,9 +82,12 @@ function SearchResults({
   boats: Boat[];
   raceBoats: RaceBoatEntry[];
   stagedIds: Set<number>;
-  hideFinished: boolean;
+  hideFinishedByMe: boolean;
+  hideCertified: boolean;
   finishTimeDisplay: FinishTimeDisplay;
   starts: StartInfo[];
+  myObservations: FinishObservation[];
+  allObservations: FinishObservation[];
   onStage: (boatId: number) => void;
   onAdjustFinish: (boatId: number, delta: number) => void;
   onUnfinish: (boatId: number) => void;
@@ -87,9 +96,20 @@ function SearchResults({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
 
+  const myObsBoatIds = new Set(myObservations.map((o) => o.boat_id));
+  const allObsByBoat = new Map<number, FinishObservation[]>();
+  allObservations.forEach((o) => {
+    const arr = allObsByBoat.get(o.boat_id) || [];
+    arr.push(o);
+    allObsByBoat.set(o.boat_id, arr);
+  });
+
   const q = query.trim().toLowerCase();
   const results = raceBoats.filter((rb) => {
-    if (hideFinished && rb.finishTime != null) return false;
+    const isCertified = rb.finishTime != null && rb.status === "finished";
+    const isFinishedByMe = myObsBoatIds.has(rb.boatId);
+    if (hideCertified && isCertified) return false;
+    if (hideFinishedByMe && isFinishedByMe && !isCertified) return false;
     if (!q) return true;
     const boat = boats.find((b) => b.id === rb.boatId);
     if (!boat) return false;
@@ -115,18 +135,31 @@ function SearchResults({
       {results.map((rb) => {
         const boat = boats.find((b) => b.id === rb.boatId);
         const alreadyStaged = stagedIds.has(rb.boatId);
-        const alreadyFinished = rb.finishTime != null;
+        const isCertified = rb.finishTime != null && rb.status === "finished";
+        const myObs = myObservations.find((o) => o.boat_id === rb.boatId);
+        const boatObs = allObsByBoat.get(rb.boatId) || [];
+        const observedByMe = !!myObs;
         const isDnfDns = rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ" || rb.status === "OCS";
         const isEditing = editingId === rb.boatId;
         const showMenu = menuOpenId === rb.boatId;
 
+        // Status text
+        let statusText = rb.status;
+        if (isCertified) {
+          statusText = formatFinishTime(rb.finishTime as number, finishTimeDisplay, rb.class, starts) + " ✓";
+        } else if (observedByMe) {
+          statusText = formatFinishTime(myObs!.observed_time, finishTimeDisplay, rb.class, starts);
+        } else if (alreadyStaged) {
+          statusText = "Staged";
+        }
+
         return (
           <div key={rb.boatId} className="finish-search-entry">
-            <div className={`finish-search-item ${alreadyStaged ? "finish-search-item--staged" : ""} ${alreadyFinished ? "finish-search-item--finished" : ""} ${isDnfDns ? "finish-search-item--dnf" : ""}`}>
+            <div className={`finish-search-item ${alreadyStaged ? "finish-search-item--staged" : ""} ${isCertified ? "finish-search-item--finished" : ""} ${observedByMe && !isCertified ? "finish-search-item--observed" : ""} ${isDnfDns ? "finish-search-item--dnf" : ""}`}>
               <button
                 className="finish-search-item-main"
                 onClick={() => {
-                  if (alreadyFinished || isDnfDns) {
+                  if (isCertified || observedByMe || isDnfDns) {
                     setEditingId(isEditing ? null : rb.boatId);
                     setMenuOpenId(null);
                   } else if (!alreadyStaged) {
@@ -141,11 +174,14 @@ function SearchResults({
                   )}
                   <span className="checkin-boat-class">{rb.class}</span>
                 </div>
-                <span className="finish-search-item-status">
-                  {alreadyFinished
-                    ? formatFinishTime(rb.finishTime as number, finishTimeDisplay, rb.class, starts)
-                    : alreadyStaged ? "Staged" : rb.status}
-                </span>
+                <div className="finish-search-item-right">
+                  {boatObs.length > 0 && !isCertified && (
+                    <span className="finish-obs-badge">{boatObs.length} obs</span>
+                  )}
+                  <span className="finish-search-item-status">
+                    {statusText}
+                  </span>
+                </div>
               </button>
               <button
                 className="finish-search-item-dots"
@@ -179,12 +215,12 @@ function SearchResults({
               </div>
             )}
 
-            {/* Edit row for finished boats */}
-            {isEditing && alreadyFinished && (
+            {/* Edit row for observed (by me) boats */}
+            {isEditing && observedByMe && !isCertified && (
               <div className="finish-edit-row">
                 <div className="staged-time-display">
                   <button className="staged-time-adj" onClick={() => onAdjustFinish(rb.boatId, -1000)}>−1s</button>
-                  <span className="staged-time">{formatFinishTime(rb.finishTime as number, finishTimeDisplay, rb.class, starts)}</span>
+                  <span className="staged-time">{formatFinishTime(myObs!.observed_time, finishTimeDisplay, rb.class, starts)}</span>
                   <button className="staged-time-adj" onClick={() => onAdjustFinish(rb.boatId, 1000)}>+1s</button>
                 </div>
                 <button
@@ -193,6 +229,16 @@ function SearchResults({
                 >
                   Unfinish
                 </button>
+              </div>
+            )}
+
+            {/* Edit row for certified boats */}
+            {isEditing && isCertified && (
+              <div className="finish-edit-row">
+                <div className="staged-time-display">
+                  <span className="staged-time">{formatFinishTime(rb.finishTime as number, finishTimeDisplay, rb.class, starts)}</span>
+                </div>
+                <span className="finish-certified-label">Certified</span>
               </div>
             )}
 
@@ -410,16 +456,169 @@ function StagedBoatRow({
   );
 }
 
+// ---- Certify modal ----
+
+function CertifyModal({
+  raceBoats,
+  boats,
+  observations,
+  starts,
+  finishTimeDisplay,
+  onCertify,
+  onDismissObservation,
+  onClose,
+}: {
+  raceBoats: RaceBoatEntry[];
+  boats: Boat[];
+  observations: FinishObservation[];
+  starts: StartInfo[];
+  finishTimeDisplay: FinishTimeDisplay;
+  onCertify: (boatId: number, time: number) => void;
+  onDismissObservation: (obsId: number) => void;
+  onClose: () => void;
+}) {
+  // Group observations by boat, excluding already-certified boats
+  const certifiedBoatIds = new Set(
+    raceBoats.filter((rb) => rb.finishTime != null && rb.status === "finished").map((rb) => rb.boatId)
+  );
+  const boatGroups = new Map<number, FinishObservation[]>();
+  observations.forEach((o) => {
+    if (certifiedBoatIds.has(o.boat_id)) return;
+    const arr = boatGroups.get(o.boat_id) || [];
+    arr.push(o);
+    boatGroups.set(o.boat_id, arr);
+  });
+
+  const sortedBoatIds = Array.from(boatGroups.keys()).sort((a, b) => {
+    const aMin = Math.min(...(boatGroups.get(a) || []).map((o) => o.observed_time));
+    const bMin = Math.min(...(boatGroups.get(b) || []).map((o) => o.observed_time));
+    return aMin - bMin;
+  });
+
+  const getBoatName = (boatId: number) => {
+    const boat = boats.find((b) => b.id === boatId);
+    return boat?.name || `Boat #${boatId}`;
+  };
+
+  const getBoatClass = (boatId: number) => {
+    const rb = raceBoats.find((r) => r.boatId === boatId);
+    return rb?.class || "";
+  };
+
+  const certifyAll = () => {
+    sortedBoatIds.forEach((boatId) => {
+      const obs = boatGroups.get(boatId)!;
+      const avg = Math.round(obs.reduce((s, o) => s + o.observed_time, 0) / obs.length);
+      onCertify(boatId, avg);
+    });
+    onClose();
+  };
+
+  return createPortal(
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="settings-modal certify-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="settings-header">
+          <span className="settings-title">Certify Finishes</span>
+          <button className="settings-close" onClick={onClose}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="settings-body">
+          {sortedBoatIds.length === 0 && (
+            <div className="clubs-empty">No uncertified finishes to review.</div>
+          )}
+
+          {sortedBoatIds.map((boatId) => {
+            const obs = boatGroups.get(boatId)!;
+            const avg = Math.round(obs.reduce((s, o) => s + o.observed_time, 0) / obs.length);
+            const boatClass = getBoatClass(boatId);
+
+            return (
+              <div key={boatId} className="certify-boat">
+                <div className="certify-boat-header">
+                  <span className="certify-boat-name">{getBoatName(boatId)}</span>
+                  {boatClass && <span className="certify-boat-class">{boatClass}</span>}
+                </div>
+
+                <div className="certify-obs-list">
+                  {obs.map((o) => (
+                    <div key={o.id} className="certify-obs-row">
+                      <span className="certify-obs-time">
+                        {formatFinishTime(o.observed_time, finishTimeDisplay, boatClass, starts)}
+                      </span>
+                      <span className="certify-obs-by">{o.observer_name || "Unknown"}</span>
+                      <button className="certify-obs-dismiss" onClick={() => onDismissObservation(o.id)}>×</button>
+                    </div>
+                  ))}
+                </div>
+
+                {obs.length > 1 && (
+                  <div className="certify-avg">
+                    Avg: {formatFinishTime(avg, finishTimeDisplay, boatClass, starts)}
+                  </div>
+                )}
+
+                <div className="certify-actions">
+                  {obs.length === 1 ? (
+                    <button className="btn btn-primary btn-sm" onClick={() => onCertify(boatId, obs[0].observed_time)}>
+                      Certify
+                    </button>
+                  ) : (
+                    <>
+                      <button className="btn btn-primary btn-sm" onClick={() => onCertify(boatId, avg)}>
+                        Use Average
+                      </button>
+                      {obs.map((o) => (
+                        <button
+                          key={o.id}
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => onCertify(boatId, o.observed_time)}
+                        >
+                          Use {o.observer_name?.split(" ")[0] || "?"}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {sortedBoatIds.length > 0 && (
+            <button className="btn btn-primary certify-all-btn" onClick={certifyAll}>
+              Certify All ({sortedBoatIds.length}) — Use Averages
+            </button>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ---- Main FinishTab ----
 
 export default function FinishTab() {
   const { selectedRace, updateRaceData, boats } = useRaces();
+  const { user, token } = useAuth();
+  const auth = user && token ? { userId: user.id, token } : null;
   const { now } = useTime();
   const [search, setSearch] = useState("");
-  const [hideFinished, setHideFinished] = useState(false);
+  const [hideFinishedByMe, setHideFinishedByMe] = useState(false);
+  const [hideCertified, setHideCertified] = useState(false);
   const [finishTimeDisplay, setFinishTimeDisplay] = useState<FinishTimeDisplay>(
     (localStorage.getItem("racemate-finish-display") as FinishTimeDisplay) || "clock"
   );
+
+  // Observation state
+  const [myObservations, setMyObservations] = useState<FinishObservation[]>([]);
+  const [allObservations, setAllObservations] = useState<FinishObservation[]>([]);
+  const [certifyOpen, setCertifyOpen] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
 
   // Listen for settings changes
   useEffect(() => {
@@ -431,6 +630,32 @@ export default function FinishTab() {
     window.addEventListener("racemate-settings-changed", handler);
     return () => window.removeEventListener("racemate-settings-changed", handler);
   }, []);
+
+  // Load my observations for this race on mount / race change
+  useEffect(() => {
+    if (!auth || !selectedRace) return;
+    getFinishObservations(auth, selectedRace.id).then((res) => {
+      const obs = res.observations || [];
+      setAllObservations(obs);
+      setMyObservations(obs.filter((o) => o.user_id === user?.id));
+    }).catch(() => {});
+  }, [selectedRace?.id, auth?.userId]);
+
+  // Sync: fetch all observations for certification
+  const handleSync = useCallback(async () => {
+    if (!auth || !selectedRace) return;
+    setSyncLoading(true);
+    try {
+      const res = await getFinishObservations(auth, selectedRace.id);
+      const obs = res.observations || [];
+      setAllObservations(obs);
+      setMyObservations(obs.filter((o) => o.user_id === user?.id));
+      setCertifyOpen(true);
+    } catch {
+      // ignore
+    }
+    setSyncLoading(false);
+  }, [auth, selectedRace, user?.id]);
   const [staged, setStaged] = useState<StagedBoat[]>([]);
   const [stagingOpen, setStagingOpen] = useState(true);
 
@@ -555,23 +780,67 @@ export default function FinishTab() {
   };
 
   const saveLapFinish = (boatId: number, finishTime: number | null, lapsCompleted: number, lapTimes: number[], isFinished: boolean) => {
+    // Save lap data to race (laps are not observation-based)
     const updatedBoats = raceBoats.map((b) => {
       if (b.boatId !== boatId) return b;
-      return { ...b, finishTime, lapsCompleted, lapTimes, status: isFinished ? "finished" : "racing" };
+      return { ...b, lapsCompleted, lapTimes };
     });
     updateRaceData(selectedRace.id, selectedRace.name, { ...selectedRace.info, boats: updatedBoats });
+
+    // If final lap, create observation
+    if (isFinished && finishTime != null && auth) {
+      addFinishObservation(auth, selectedRace.id, boatId, finishTime).then((res) => {
+        if (res.observation?.[0]) {
+          setMyObservations((prev) => {
+            const filtered = prev.filter((o) => o.boat_id !== boatId);
+            return [...filtered, res.observation[0]];
+          });
+        }
+      });
+    }
   };
 
   const saveFinishTime = (boatId: number, time: number | null) => {
-    const updatedBoats = raceBoats.map((b) => {
-      if (b.boatId !== boatId) return b;
-      return { ...b, finishTime: time, status: time != null ? "finished" : "racing" };
-    });
-    updateRaceData(selectedRace.id, selectedRace.name, { ...selectedRace.info, boats: updatedBoats });
+    if (!auth) return;
+    if (time != null) {
+      // Find existing observation to replace
+      const existing = myObservations.find((o) => o.boat_id === boatId);
+      if (existing) {
+        // Delete old, create new
+        deleteFinishObservation(auth, existing.id).then(() => {
+          addFinishObservation(auth, selectedRace.id, boatId, time).then((res) => {
+            if (res.observation?.[0]) {
+              setMyObservations((prev) => {
+                const filtered = prev.filter((o) => o.boat_id !== boatId);
+                return [...filtered, res.observation[0]];
+              });
+            }
+          });
+        });
+      } else {
+        addFinishObservation(auth, selectedRace.id, boatId, time).then((res) => {
+          if (res.observation?.[0]) {
+            setMyObservations((prev) => [...prev, res.observation[0]]);
+          }
+        });
+      }
+    } else {
+      // Unfinish — delete observation
+      const existing = myObservations.find((o) => o.boat_id === boatId);
+      if (existing) {
+        deleteFinishObservation(auth, existing.id);
+        setMyObservations((prev) => prev.filter((o) => o.boat_id !== boatId));
+      }
+    }
   };
 
   const getBoat = (id: number) => boats.find((b) => b.id === id);
   const getRaceBoat = (id: number) => raceBoats.find((rb) => rb.boatId === id);
+
+  // Count boats with observations but not certified
+  const certifiedBoatIds = new Set(raceBoats.filter((rb) => rb.finishTime != null && rb.status === "finished").map((rb) => rb.boatId));
+  const uncertifiedBoatIds = new Set(allObservations.map((o) => o.boat_id).filter((id) => !certifiedBoatIds.has(id)));
+  const uncertifiedCount = uncertifiedBoatIds.size;
 
   return (
     <div className="finish-tab">
@@ -639,20 +908,29 @@ export default function FinishTab() {
         boats={boats}
         raceBoats={raceBoats}
         stagedIds={stagedBoatIds}
-        hideFinished={hideFinished}
+        hideFinishedByMe={hideFinishedByMe}
+        hideCertified={hideCertified}
         finishTimeDisplay={finishTimeDisplay}
         starts={selectedRace.info.starts || []}
+        myObservations={myObservations}
+        allObservations={allObservations}
         onStage={stageBoat}
         onAdjustFinish={(boatId, delta) => {
-          const rb = raceBoats.find((b) => b.boatId === boatId);
-          if (rb?.finishTime != null) {
-            saveFinishTime(boatId, (rb.finishTime as number) + delta);
+          const myObs = myObservations.find((o) => o.boat_id === boatId);
+          if (myObs) {
+            saveFinishTime(boatId, myObs.observed_time + delta);
           }
         }}
         onUnfinish={(boatId) => {
           saveFinishTime(boatId, null);
         }}
         onSetStatus={(boatId, status) => {
+          // Also delete observation if setting DNF/DNS
+          const myObs = myObservations.find((o) => o.boat_id === boatId);
+          if (myObs && auth) {
+            deleteFinishObservation(auth, myObs.id);
+            setMyObservations((prev) => prev.filter((o) => o.boat_id !== boatId));
+          }
           const updatedBoats = raceBoats.map((b) => {
             if (b.boatId !== boatId) return b;
             return { ...b, status, finishTime: null };
@@ -663,18 +941,72 @@ export default function FinishTab() {
 
       {/* Fixed bottom bar */}
       <div className="finish-bottom-bar">
-        <span className="finish-racing-count">
-          {raceBoats.filter((rb) => rb.status === "racing" && rb.finishTime == null).length} still racing
-        </span>
-        <label className="finish-hide-toggle">
-          <input
-            type="checkbox"
-            checked={hideFinished}
-            onChange={(e) => setHideFinished(e.target.checked)}
-          />
-          <span>Hide finished</span>
-        </label>
+        <div className="finish-bottom-left">
+          <span className="finish-racing-count">
+            {raceBoats.filter((rb) => rb.status !== "DNF" && rb.status !== "DNS" && rb.status !== "DSQ" && rb.status !== "OCS" && rb.status !== "finished").length} racing
+          </span>
+          {uncertifiedCount > 0 && (
+            <button
+              className="finish-certify-btn"
+              onClick={handleSync}
+              disabled={syncLoading}
+            >
+              {syncLoading ? "..." : `Certify (${uncertifiedCount})`}
+            </button>
+          )}
+        </div>
+        <div className="finish-bottom-right">
+          <label className="finish-hide-toggle">
+            <input
+              type="checkbox"
+              checked={hideFinishedByMe}
+              onChange={(e) => setHideFinishedByMe(e.target.checked)}
+            />
+            <span>Hide my finishes</span>
+          </label>
+          <label className="finish-hide-toggle">
+            <input
+              type="checkbox"
+              checked={hideCertified}
+              onChange={(e) => setHideCertified(e.target.checked)}
+            />
+            <span>Hide certified</span>
+          </label>
+        </div>
       </div>
+
+      {/* Certify modal */}
+      {certifyOpen && (
+        <CertifyModal
+          raceBoats={raceBoats}
+          boats={boats}
+          observations={allObservations}
+          starts={selectedRace.info.starts || []}
+          finishTimeDisplay={finishTimeDisplay}
+          onCertify={(boatId, time) => {
+            const updatedBoats = raceBoats.map((b) => {
+              if (b.boatId !== boatId) return b;
+              return { ...b, finishTime: time, status: "finished" };
+            });
+            updateRaceData(selectedRace.id, selectedRace.name, { ...selectedRace.info, boats: updatedBoats });
+            // Remove observations for this boat
+            if (auth) {
+              const boatObs = allObservations.filter((o) => o.boat_id === boatId);
+              boatObs.forEach((o) => deleteFinishObservation(auth, o.id));
+              setAllObservations((prev) => prev.filter((o) => o.boat_id !== boatId));
+              setMyObservations((prev) => prev.filter((o) => o.boat_id !== boatId));
+            }
+          }}
+          onDismissObservation={(obsId) => {
+            if (auth) {
+              deleteFinishObservation(auth, obsId);
+              setAllObservations((prev) => prev.filter((o) => o.id !== obsId));
+              setMyObservations((prev) => prev.filter((o) => o.id !== obsId));
+            }
+          }}
+          onClose={() => setCertifyOpen(false)}
+        />
+      )}
     </div>
   );
 }

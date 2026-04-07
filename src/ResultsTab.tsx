@@ -1,8 +1,10 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useRaces } from "./RaceContext";
+import { useAuth } from "./AuthContext";
 import type { Race, Boat } from "./RaceContext";
 import type { RaceBoatEntry, StartInfo } from "./api";
+import { getFinishObservations } from "./api";
 
 // ---- Resizable split panel ----
 
@@ -1208,7 +1210,25 @@ function exportSeriesCSVWithSummary(
 
 export default function ResultsTab() {
   const { selectedRace, races, series, boats, updateSeriesData, updateRaceData } = useRaces();
+  const { user, token } = useAuth();
+  const auth = user && token ? { userId: user.id, token } : null;
   const [viewMode, setViewMode] = useState<"race" | "series">("race");
+  const [uncertifiedCount, setUncertifiedCount] = useState(0);
+
+  // Check for uncertified observations
+  useEffect(() => {
+    if (!auth || !selectedRace) { setUncertifiedCount(0); return; }
+    getFinishObservations(auth, selectedRace.id).then((res) => {
+      const obs = res.observations || [];
+      const certifiedIds = new Set(
+        (selectedRace.info.boats || [])
+          .filter((rb) => rb.finishTime != null && rb.status === "finished")
+          .map((rb) => rb.boatId)
+      );
+      const uncertified = new Set(obs.map((o) => o.boat_id).filter((id) => !certifiedIds.has(id)));
+      setUncertifiedCount(uncertified.size);
+    }).catch(() => setUncertifiedCount(0));
+  }, [selectedRace?.id, selectedRace?.info.boats, auth?.userId]);
   const [timingMode, setTimingMode] = useState<TimingMode>("absolute");
   const [correctionMethod, setCorrectionMethod] = useState<CorrectionMethod>("phrf-tot");
   const [perClassEnabled, setPerClassEnabled] = useState(false);
@@ -1350,6 +1370,14 @@ export default function ResultsTab() {
 
   return (
     <div className="results-tab">
+      {/* Uncertified finishes warning */}
+      {uncertifiedCount > 0 && (
+        <div className="results-certify-warning">
+          <span className="results-warning-icon">⚠</span>
+          <span>{uncertifiedCount} boat{uncertifiedCount !== 1 ? "s have" : " has"} uncertified finish times. Go to the Finish tab to certify before calculating results.</span>
+        </div>
+      )}
+
       {/* View toggle - always visible */}
       {hasMultipleRaces && (
         <div className="start-mode-toggle">

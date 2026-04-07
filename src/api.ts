@@ -407,3 +407,54 @@ export async function getAssistantRaces(
     token: auth.token,
   });
 }
+
+// ---- Finish observations ----
+
+export interface FinishObservation {
+  id: number;
+  race_id: number;
+  user_id: string;
+  boat_id: number;
+  observed_time: number;
+  info: string;
+  observer_name?: string;
+}
+
+export async function addFinishObservation(
+  auth: AuthParams,
+  raceId: number,
+  boatId: number,
+  observedTime: number,
+  observationInfo: Record<string, unknown> = {}
+): Promise<{ message: string; observation: FinishObservation[] }> {
+  return post("addFinishObservation", {
+    userId: auth.userId,
+    token: auth.token,
+    raceId,
+    boatId,
+    observedTime,
+    observationInfo,
+  });
+}
+
+export async function getFinishObservations(
+  auth: AuthParams,
+  raceId: number
+): Promise<{ message: string; observations: FinishObservation[] }> {
+  return post("getFinishObservations", {
+    userId: auth.userId,
+    token: auth.token,
+    raceId,
+  });
+}
+
+export async function deleteFinishObservation(
+  auth: AuthParams,
+  observationId: number
+): Promise<{ message: string }> {
+  return post("deleteFinishObservation", {
+    userId: auth.userId,
+    token: auth.token,
+    observationId,
+  });
+}

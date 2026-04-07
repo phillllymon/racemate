@@ -158,9 +158,32 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       ownedSeries.forEach((s) => seriesMap.set(s.id, s));
       assistSeries.forEach((s) => { if (!seriesMap.has(s.id)) seriesMap.set(s.id, s); });
 
+      // Collect boat IDs from assistant races that we don't own
+      const ownedBoats = boatsRes.results.map((r: BoatRecord) => parseRecord<BoatInfo>(r));
+      const ownedBoatIds = new Set(ownedBoats.map((b) => b.id));
+      const missingBoatIds = new Set<number>();
+      assistRaces.forEach((race) => {
+        (race.info.boats || []).forEach((rb) => {
+          if (!ownedBoatIds.has(rb.boatId)) missingBoatIds.add(rb.boatId);
+        });
+      });
+
+      // Fetch missing boats by ID
+      let allBoats = ownedBoats;
+      if (missingBoatIds.size > 0) {
+        const fetches = Array.from(missingBoatIds).map((id) =>
+          getBoatsByColumn(auth, "id", id).catch(() => ({ results: [] as BoatRecord[] }))
+        );
+        const results = await Promise.all(fetches);
+        const extraBoats = results.flatMap((r) =>
+          r.results.map((br: BoatRecord) => parseRecord<BoatInfo>(br))
+        );
+        allBoats = [...ownedBoats, ...extraBoats];
+      }
+
       setRaces(Array.from(raceMap.values()));
       setSeries(Array.from(seriesMap.values()));
-      setBoats(boatsRes.results.map((r: BoatRecord) => parseRecord<BoatInfo>(r)));
+      setBoats(allBoats);
     } catch (_e) {
       // Keep existing state on error
     }
