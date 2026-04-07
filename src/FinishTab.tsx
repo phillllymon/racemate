@@ -25,7 +25,7 @@ function generateId(): string {
 // ---- Time formatting ----
 
 function formatFinishTimeShort(ms: number): string {
-  const d = new Date(ms);
+  const d = new Date(Number(ms));
   const h = String(d.getHours()).padStart(2, "0");
   const m = String(d.getMinutes()).padStart(2, "0");
   const s = String(d.getSeconds()).padStart(2, "0");
