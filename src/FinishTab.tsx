@@ -631,11 +631,15 @@ export default function FinishTab() {
     return () => window.removeEventListener("racemate-settings-changed", handler);
   }, []);
 
+  // Normalize observations — database may return observed_time as string
+  const normalizeObs = (obs: FinishObservation[]): FinishObservation[] =>
+    obs.map((o) => ({ ...o, observed_time: Number(o.observed_time) }));
+
   // Load my observations for this race on mount / race change
   useEffect(() => {
     if (!auth || !selectedRace) return;
     getFinishObservations(auth, selectedRace.id).then((res) => {
-      const obs = res.observations || [];
+      const obs = normalizeObs(res.observations || []);
       setAllObservations(obs);
       setMyObservations(obs.filter((o) => o.user_id === user?.id));
     }).catch(() => {});
@@ -647,7 +651,7 @@ export default function FinishTab() {
     setSyncLoading(true);
     try {
       const res = await getFinishObservations(auth, selectedRace.id);
-      const obs = res.observations || [];
+      const obs = normalizeObs(res.observations || []);
       setAllObservations(obs);
       setMyObservations(obs.filter((o) => o.user_id === user?.id));
       setCertifyOpen(true);
@@ -791,7 +795,7 @@ export default function FinishTab() {
     if (isFinished && finishTime != null && auth) {
       addFinishObservation(auth, selectedRace.id, boatId, finishTime).then((res) => {
         if (res.observation?.[0]) {
-          const obs = res.observation[0];
+          const obs = { ...res.observation[0], observed_time: Number(res.observation[0].observed_time) };
           setMyObservations((prev) => {
             const filtered = prev.filter((o) => o.boat_id !== boatId);
             return [...filtered, obs];
@@ -816,7 +820,7 @@ export default function FinishTab() {
           setAllObservations((prev) => prev.filter((o) => o.id !== existing.id));
           addFinishObservation(auth, selectedRace.id, boatId, time).then((res) => {
             if (res.observation?.[0]) {
-              const obs = res.observation[0];
+              const obs = { ...res.observation[0], observed_time: Number(res.observation[0].observed_time) };
               setMyObservations((prev) => {
                 const filtered = prev.filter((o) => o.boat_id !== boatId);
                 return [...filtered, obs];
@@ -828,7 +832,7 @@ export default function FinishTab() {
       } else {
         addFinishObservation(auth, selectedRace.id, boatId, time).then((res) => {
           if (res.observation?.[0]) {
-            const obs = res.observation[0];
+            const obs = { ...res.observation[0], observed_time: Number(res.observation[0].observed_time) };
             setMyObservations((prev) => [...prev, obs]);
             setAllObservations((prev) => [...prev, obs]);
           }
