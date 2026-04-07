@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
-import { signIn as apiSignIn, signUp as apiSignUp, signOut as apiSignOut, type User } from "./api";
+import { createContext, useContext, useState, useEffect } from "react";
+import type { ReactNode } from "react";
+import { signIn as apiSignIn, signUp as apiSignUp, signOut as apiSignOut } from "./api";
+import type { User } from "./api";
 
 interface AuthState {
   user: User | null;
@@ -23,7 +25,7 @@ function loadSession(): { user: User; token: string } | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.user?.id && parsed?.token) return parsed;
-  } catch {
+  } catch (_e) {
     /* corrupted storage */
   }
   return null;
@@ -51,6 +53,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       setState((s) => ({ ...s, loading: false }));
     }
+  }, []);
+
+  // Auto-logout when token becomes invalid (signed in on another device)
+  useEffect(() => {
+    const handler = () => {
+      clearSession();
+      setState({ user: null, token: null, loading: false });
+    };
+    window.addEventListener("racemate-auth-invalid", handler);
+    return () => window.removeEventListener("racemate-auth-invalid", handler);
   }, []);
 
   const login = async (email: string, password: string): Promise<string | null> => {
@@ -83,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (state.user && state.token) {
       try {
         await apiSignOut(state.user.id, state.token);
-      } catch {
+      } catch (_e) {
         /* sign out best-effort */
       }
     }
