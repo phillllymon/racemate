@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRaces } from "./RaceContext";
 import { useAuth } from "./AuthContext";
@@ -791,9 +791,14 @@ export default function FinishTab() {
     if (isFinished && finishTime != null && auth) {
       addFinishObservation(auth, selectedRace.id, boatId, finishTime).then((res) => {
         if (res.observation?.[0]) {
+          const obs = res.observation[0];
           setMyObservations((prev) => {
             const filtered = prev.filter((o) => o.boat_id !== boatId);
-            return [...filtered, res.observation[0]];
+            return [...filtered, obs];
+          });
+          setAllObservations((prev) => {
+            const filtered = prev.filter((o) => o.boat_id !== boatId || o.user_id !== auth.userId);
+            return [...filtered, obs];
           });
         }
       });
@@ -808,19 +813,24 @@ export default function FinishTab() {
       if (existing) {
         // Delete old, create new
         deleteFinishObservation(auth, existing.id).then(() => {
+          setAllObservations((prev) => prev.filter((o) => o.id !== existing.id));
           addFinishObservation(auth, selectedRace.id, boatId, time).then((res) => {
             if (res.observation?.[0]) {
+              const obs = res.observation[0];
               setMyObservations((prev) => {
                 const filtered = prev.filter((o) => o.boat_id !== boatId);
-                return [...filtered, res.observation[0]];
+                return [...filtered, obs];
               });
+              setAllObservations((prev) => [...prev, obs]);
             }
           });
         });
       } else {
         addFinishObservation(auth, selectedRace.id, boatId, time).then((res) => {
           if (res.observation?.[0]) {
-            setMyObservations((prev) => [...prev, res.observation[0]]);
+            const obs = res.observation[0];
+            setMyObservations((prev) => [...prev, obs]);
+            setAllObservations((prev) => [...prev, obs]);
           }
         });
       }
@@ -830,6 +840,7 @@ export default function FinishTab() {
       if (existing) {
         deleteFinishObservation(auth, existing.id);
         setMyObservations((prev) => prev.filter((o) => o.boat_id !== boatId));
+        setAllObservations((prev) => prev.filter((o) => o.id !== existing.id));
       }
     }
   };
