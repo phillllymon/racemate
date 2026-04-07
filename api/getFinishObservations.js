@@ -40,18 +40,38 @@ module.exports.default = async function handler(req, res) {
                 return;
             }
 
+            // Step 1: get observations
             const observations = await sql`
-                SELECT fo.*, u.name as observer_name
-                FROM finish_observations fo
-                LEFT JOIN users u ON fo.user_id = u.id
-                WHERE fo.race_id = ${raceId}
-                ORDER BY fo.observed_time ASC
+                SELECT * FROM finish_observations
+                WHERE race_id = ${raceId}
+                ORDER BY observed_time ASC
             `;
+
+            if (observations.length === 0) {
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    message: "observations retrieved",
+                    observations: []
+                }));
+                return;
+            }
+
+            // Step 2: get observer names
+            const observerIds = [...new Set(observations.map(o => o.user_id))];
+            const observerUsers = await sql`SELECT id, name FROM users WHERE id = ANY(${observerIds})`;
+
+            const enriched = observations.map(o => {
+                const u = observerUsers.find(u => u.id === o.user_id);
+                return {
+                    ...o,
+                    observer_name: u ? u.name : null
+                };
+            });
 
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({
                 message: "observations retrieved",
-                observations: observations
+                observations: enriched
             }));
 
         } catch (err) {
