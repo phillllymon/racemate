@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { useRaces } from "./RaceContext";
 import { useAuth } from "./AuthContext";
 import type { Race, Boat } from "./RaceContext";
-import type { RaceBoatEntry, StartInfo } from "./api";
+import type { RaceBoatEntry, StartInfo, ScoringSettings } from "./api";
 import { getFinishObservations } from "./api";
 
 // ---- Resizable split panel ----
@@ -153,17 +153,24 @@ interface ClassFactor {
 // Per-class course length per race: raceId -> className -> distance in nm
 type ClassCourseLengths = Record<string, Record<string, number>>;
 
+interface Division {
+  name: string;
+  classes: string[];
+}
+
 interface BoatResult {
   boatId: number;
   boatName: string;
   sailNumber: string;
   skipper: string;
   className: string;
+  divisionName: string | null;
   phrf: number | null;
   rating: number | string | null;
   elapsedMs: number | null;
   correctedMs: number | null;
   classRank: number | null;
+  divisionRank: number | null;
   overallRank: number | null;
   status: string;
   lapsCompleted: number;
@@ -184,10 +191,12 @@ interface SeriesBoatResult {
   sailNumber: string;
   skipper: string;
   className: string;
+  divisionName: string | null;
   customFields: Record<string, string>;
   raceResults: Array<{
     raceId: number;
     classRank: number | null;
+    divisionRank: number | null;
     overallRank: number | null;
     elapsedMs: number | null;
     correctedMs: number | null;
@@ -197,6 +206,7 @@ interface SeriesBoatResult {
   totalPoints: number | null;
   totalTimeMs: number | null;
   seriesClassRank: number | null;
+  seriesDivisionRank: number | null;
   seriesOverallRank: number | null;
 }
 
@@ -277,7 +287,8 @@ function calculateRaceResults(
   portsmouthBase: PortsmouthBase,
   useFleetAvg: boolean,
   perClassEnabled: boolean = false,
-  perClassConfig: Record<string, ClassTimingConfig> = {}
+  perClassConfig: Record<string, ClassTimingConfig> = {},
+  divisions: Division[] = []
 ): RaceResults {
   const raceBoats = race.info.boats || [];
   const starts = race.info.starts || [];
@@ -345,17 +356,22 @@ function calculateRaceResults(
     else if (boatTimingMethod === "portsmouth") rating = pn;
     else if (boatTimingMethod === "irc") rating = boat?.info.ircTcc != null ? Number(boat.info.ircTcc) : null;
 
+    // Find division for this boat's class
+    const div = divisions.find((d) => d.classes.includes(rb.class));
+
     return {
       boatId: rb.boatId,
       boatName: boat?.name || `Boat #${rb.boatId}`,
       sailNumber: boat?.info.sailNumber || "",
       skipper: boat?.info.skipper || "",
       className: rb.class,
+      divisionName: div?.name || null,
       phrf,
       rating,
       elapsedMs,
       correctedMs,
       classRank: null,
+      divisionRank: null,
       overallRank: null,
       status: rb.status,
       lapsCompleted,
@@ -380,11 +396,23 @@ function calculateRaceResults(
     classFinished.forEach((r, i) => { r.classRank = i + 1; });
   });
 
+  // Rank by division
+  const divisionNames = Array.from(new Set(results.map((r) => r.divisionName).filter(Boolean))) as string[];
+  divisionNames.forEach((divName) => {
+    const divFinished = results.filter((r) => r.divisionName === divName && r.correctedMs != null && r.lapsCompleted >= r.totalLaps);
+    divFinished.sort((a, b) => a.correctedMs! - b.correctedMs!);
+    divFinished.forEach((r, i) => { r.divisionRank = i + 1; });
+  });
+
   // Penalty ranks for non-finishers
   const totalBoats = results.length;
   const classBoatCounts = new Map<string, number>();
   classes.forEach((cls) => {
     classBoatCounts.set(cls, results.filter((r) => r.className === cls).length);
+  });
+  const divBoatCounts = new Map<string, number>();
+  divisionNames.forEach((divName) => {
+    divBoatCounts.set(divName, results.filter((r) => r.divisionName === divName).length);
   });
 
   results.forEach((r) => {
@@ -393,6 +421,9 @@ function calculateRaceResults(
       if (["OCS", "DNF", "DNS", "DSQ", "FINISHED"].includes(s) || r.lapsCompleted < r.totalLaps) {
         r.overallRank = totalBoats + 1;
         r.classRank = (classBoatCounts.get(r.className) || 0) + 1;
+        if (r.divisionName) {
+          r.divisionRank = (divBoatCounts.get(r.divisionName) || 0) + 1;
+        }
       }
     }
   });
@@ -415,7 +446,8 @@ function calculateSeriesResults(
   dnfPenaltyFactor: number,
   useFleetAvg: boolean,
   perClassEnabled: boolean = false,
-  perClassConfig: Record<string, ClassTimingConfig> = {}
+  perClassConfig: Record<string, ClassTimingConfig> = {},
+  divisions: Division[] = []
 ): SeriesBoatResult[] {
   const allRaceResults = seriesRaces.map((race) => {
     const raceClasses = Array.from(new Set((race.info.boats || []).map((b) => b.class)));
@@ -423,7 +455,7 @@ function calculateSeriesResults(
       const existing = (classFactorsByRace[race.id] || []).find((cf) => cf.className === cls);
       return existing || { className: cls, factor: 1 };
     });
-    return calculateRaceResults(race, boats, timingMethod, raceFactors, raceWindMap[race.id] || "medium", allClassCourseLengths[String(race.id)] || {}, portsmouthBase, useFleetAvg, perClassEnabled, perClassConfig);
+    return calculateRaceResults(race, boats, timingMethod, raceFactors, raceWindMap[race.id] || "medium", allClassCourseLengths[String(race.id)] || {}, portsmouthBase, useFleetAvg, perClassEnabled, perClassConfig, divisions);
   });
 
   const boatIds = new Set<number>();
@@ -508,11 +540,16 @@ function calculateSeriesResults(
       sailNumber: boat?.info.sailNumber || firstResult?.sailNumber || "",
       skipper: boat?.info.skipper || firstResult?.skipper || "",
       className: firstResult?.className || "Default",
+      divisionName: firstResult?.divisionName || null,
       customFields: firstResult?.customFields || {},
-      raceResults,
+      raceResults: raceResults.map((rr) => {
+        const raceResult = allRaceResults.find((ar) => ar.raceId === rr.raceId)?.boats.find((b) => b.boatId === boatId);
+        return { ...rr, divisionRank: raceResult?.divisionRank ?? null };
+      }),
       totalPoints,
       totalTimeMs,
       seriesClassRank: null,
+      seriesDivisionRank: null,
       seriesOverallRank: null,
     };
   });
@@ -542,6 +579,21 @@ function calculateSeriesResults(
     }
   });
 
+  // Rank series by division
+  const divNames = Array.from(new Set(seriesResults.map((r) => r.divisionName).filter(Boolean))) as string[];
+  divNames.forEach((divName) => {
+    const divBoats = seriesResults.filter((r) => r.divisionName === divName);
+    if (seriesMethod === "points") {
+      const sorted = divBoats.filter((r) => r.totalPoints != null);
+      sorted.sort((a, b) => a.totalPoints! - b.totalPoints!);
+      sorted.forEach((r, i) => { r.seriesDivisionRank = i + 1; });
+    } else {
+      const sorted = divBoats.filter((r) => r.totalTimeMs != null);
+      sorted.sort((a, b) => a.totalTimeMs! - b.totalTimeMs!);
+      sorted.forEach((r, i) => { r.seriesDivisionRank = i + 1; });
+    }
+  });
+
   seriesResults.sort((a, b) => (a.seriesOverallRank ?? Infinity) - (b.seriesOverallRank ?? Infinity));
   return seriesResults;
 }
@@ -560,7 +612,7 @@ function downloadCSV(content: string, filename: string) {
 
 // ---- Column definitions ----
 
-type RaceColId = "elapsed" | "corrected" | "sailNum" | "class" | "skipper" | "rating" | "status";
+type RaceColId = "elapsed" | "corrected" | "sailNum" | "class" | "division" | "skipper" | "rating" | "status" | "divRank" | "classRank";
 
 interface ColDef {
   id: RaceColId;
@@ -568,24 +620,30 @@ interface ColDef {
   defaultOn: boolean;
 }
 
-function getRaceColumns(timingMethod: string, perClassEnabled: boolean = false): ColDef[] {
+function getRaceColumns(timingMethod: string, perClassEnabled: boolean = false, hasDivisions: boolean = false): ColDef[] {
   const cols: ColDef[] = [
     { id: "sailNum", label: "Sail #", defaultOn: false },
     { id: "class", label: "Class", defaultOn: false },
     { id: "skipper", label: "Skipper", defaultOn: false },
     { id: "elapsed", label: "Elapsed", defaultOn: true },
     { id: "corrected", label: "Corrected", defaultOn: timingMethod !== "absolute" || perClassEnabled },
+    { id: "classRank", label: "Class Rank", defaultOn: false },
     { id: "status", label: "Status", defaultOn: false },
   ];
 
+  if (hasDivisions) {
+    cols.splice(2, 0, { id: "division", label: "Division", defaultOn: false });
+    cols.splice(cols.findIndex((c) => c.id === "classRank") + 1, 0, { id: "divRank", label: "Div Rank", defaultOn: true });
+  }
+
   if (perClassEnabled) {
-    cols.splice(5, 0, { id: "rating", label: "Rating", defaultOn: false });
+    cols.splice(cols.findIndex((c) => c.id === "status"), 0, { id: "rating", label: "Rating", defaultOn: false });
   } else if (timingMethod === "phrf-tot" || timingMethod === "phrf-tod") {
-    cols.splice(5, 0, { id: "rating", label: "PHRF", defaultOn: false });
+    cols.splice(cols.findIndex((c) => c.id === "status"), 0, { id: "rating", label: "PHRF", defaultOn: false });
   } else if (timingMethod === "portsmouth") {
-    cols.splice(5, 0, { id: "rating", label: "Portsmouth", defaultOn: false });
+    cols.splice(cols.findIndex((c) => c.id === "status"), 0, { id: "rating", label: "Portsmouth", defaultOn: false });
   } else if (timingMethod === "irc") {
-    cols.splice(5, 0, { id: "rating", label: "IRC TCC", defaultOn: false });
+    cols.splice(cols.findIndex((c) => c.id === "status"), 0, { id: "rating", label: "IRC TCC", defaultOn: false });
   }
 
   return cols;
@@ -661,7 +719,8 @@ function RaceResultsView({
           <div className="results-row results-row--header results-row--sticky">
             <span className="results-cell results-cell--name">Boat</span>
             <span className="results-cell results-cell--rank">#</span>
-            <span className="results-cell results-cell--cls-rank">Cls</span>
+            {show("classRank") && <span className="results-cell results-cell--cls-rank">Cls</span>}
+            {show("divRank") && <span className="results-cell results-cell--cls-rank">Div</span>}
           </div>
           {sorted.map((r) => {
             const st = statusLabel(r.status);
@@ -672,7 +731,8 @@ function RaceResultsView({
                   {st && <span className="results-status-badge">{st}</span>}
                 </span>
                 <span className="results-cell results-cell--rank">{r.overallRank ?? "—"}</span>
-                <span className="results-cell results-cell--cls-rank">{r.classRank ?? "—"}</span>
+                {show("classRank") && <span className="results-cell results-cell--cls-rank">{r.classRank ?? "—"}</span>}
+                {show("divRank") && <span className="results-cell results-cell--cls-rank">{r.divisionRank ?? "—"}</span>}
               </div>
             );
           })}
@@ -683,6 +743,7 @@ function RaceResultsView({
           <div className="results-row results-row--header results-row--sticky">
             {show("sailNum") && <span className="results-cell results-cell--data">Sail #</span>}
             {show("class") && <span className="results-cell results-cell--data">Class</span>}
+            {show("division") && <span className="results-cell results-cell--data">Division</span>}
             {show("skipper") && <span className="results-cell results-cell--data">Skipper</span>}
             {show("elapsed") && <span className="results-cell results-cell--data">Elapsed</span>}
             {show("corrected") && <span className="results-cell results-cell--data">Corrected</span>}
@@ -698,6 +759,7 @@ function RaceResultsView({
             <div key={r.boatId} className={`results-row ${r.overallRank === 1 ? "results-row--first" : ""}`}>
               {show("sailNum") && <span className="results-cell results-cell--data">{r.sailNumber || "—"}</span>}
               {show("class") && <span className="results-cell results-cell--data">{r.className}</span>}
+              {show("division") && <span className="results-cell results-cell--data">{r.divisionName || "—"}</span>}
               {show("skipper") && <span className="results-cell results-cell--data">{r.skipper || "—"}</span>}
               {show("elapsed") && <span className="results-cell results-cell--data results-cell--mono">{formatElapsed(r.elapsedMs)}</span>}
               {show("corrected") && <span className="results-cell results-cell--data results-cell--mono">{formatElapsed(r.correctedMs)}</span>}
@@ -947,7 +1009,7 @@ function PerClassWarnings({
 
 // ---- Summary views ----
 
-function RaceSummary({ results, topN }: { results: RaceResults; topN: number }) {
+function RaceSummary({ results, topN, showClassResults, showDivisionResults }: { results: RaceResults; topN: number; showClassResults: boolean; showDivisionResults: boolean }) {
   const sorted = [...results.boats].sort(
     (a, b) => (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity)
   );
@@ -959,6 +1021,14 @@ function RaceSummary({ results, topN }: { results: RaceResults; topN: number }) 
       .filter((r) => r.className === cls && r.classRank != null && r.classRank <= topN)
       .sort((a, b) => a.classRank! - b.classRank!);
     return { className: cls, boats: classBoats };
+  });
+
+  const divisionNames = Array.from(new Set(results.boats.map((r) => r.divisionName).filter(Boolean))) as string[];
+  const topByDivision = divisionNames.map((divName) => {
+    const divBoats = results.boats
+      .filter((r) => r.divisionName === divName && r.divisionRank != null && r.divisionRank <= topN)
+      .sort((a, b) => a.divisionRank! - b.divisionRank!);
+    return { divisionName: divName, boats: divBoats };
   });
 
   return (
@@ -976,7 +1046,22 @@ function RaceSummary({ results, topN }: { results: RaceResults; topN: number }) 
         ))}
       </div>
 
-      {topByClass.map(({ className, boats }) => (
+      {showDivisionResults && topByDivision.map(({ divisionName, boats }) => (
+        <div key={divisionName} className="results-summary-section">
+          <div className="results-summary-heading">Top {topN} — {divisionName}</div>
+          {boats.length === 0 && <p className="races-empty">No finishers yet</p>}
+          {boats.map((r) => (
+            <div key={r.boatId} className="results-summary-row">
+              <span className="results-summary-rank">{r.divisionRank}</span>
+              <span className="results-summary-name">{r.boatName}</span>
+              <span className="results-summary-detail">{r.className}</span>
+              <span className="results-summary-time">{formatElapsed(r.correctedMs)}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {showClassResults && topByClass.map(({ className, boats }) => (
         <div key={className} className="results-summary-section">
           <div className="results-summary-heading">Top {topN} — {className}</div>
           {boats.length === 0 && <p className="races-empty">No finishers yet</p>}
@@ -1229,6 +1314,26 @@ export default function ResultsTab() {
       setUncertifiedCount(uncertified.size);
     }).catch(() => setUncertifiedCount(0));
   }, [selectedRace?.id, selectedRace?.info.boats, auth?.userId]);
+
+  // Find parent series
+  const parentSeries = series.find((s) => s.info.raceIds.includes(selectedRace?.id ?? -1)) || null;
+  const seriesRaces = parentSeries
+    ? parentSeries.info.raceIds.map((id) => races.find((r) => r.id === id)).filter(Boolean) as Race[]
+    : selectedRace ? [selectedRace] : [];
+  const hasMultipleRaces = seriesRaces.length > 1;
+
+  // Load scoring settings from saved data
+  const getSavedSettings = useCallback((): ScoringSettings => {
+    if (viewMode === "series" && parentSeries?.info.scoringSettings) {
+      return parentSeries.info.scoringSettings;
+    }
+    if (selectedRace?.info.scoringSettings) {
+      return selectedRace.info.scoringSettings;
+    }
+    return {};
+  }, [viewMode, parentSeries?.id, selectedRace?.id]);
+
+  // Scoring state
   const [timingMode, setTimingMode] = useState<TimingMode>("absolute");
   const [correctionMethod, setCorrectionMethod] = useState<CorrectionMethod>("phrf-tot");
   const [perClassEnabled, setPerClassEnabled] = useState(false);
@@ -1238,6 +1343,11 @@ export default function ResultsTab() {
   const [useFleetAverage, setUseFleetAverage] = useState(false);
   const [seriesMethod, setSeriesMethod] = useState<SeriesMethod>("points");
   const [drops, setDrops] = useState(0);
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [showClassResults, setShowClassResults] = useState(true);
+  const [showDivisionResults, setShowDivisionResults] = useState(true);
+  const [scoreByDivision, setScoreByDivision] = useState(false);
+  const [divisionsOpen, setDivisionsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [classFactorsByRace, setClassFactorsByRace] = useState<Record<number, ClassFactor[]>>({});
   const [factorsOpen, setFactorsOpen] = useState(false);
@@ -1249,6 +1359,64 @@ export default function ResultsTab() {
   const [windPerRaceOpen, setWindPerRaceOpen] = useState(false);
   const [raceWindConditions, setRaceWindConditions] = useState<Record<number, WindCondition>>({});
   const [classCourseLengths, setClassCourseLengths] = useState<ClassCourseLengths>({});
+
+  // Load saved settings when race/series/viewMode changes
+  const lastLoadedRef = useRef<string>("");
+  useEffect(() => {
+    const key = `${viewMode}-${selectedRace?.id}-${parentSeries?.id}`;
+    if (key === lastLoadedRef.current) return;
+    lastLoadedRef.current = key;
+    const s = getSavedSettings();
+    if (Object.keys(s).length === 0) return;
+    setTimingMode(s.timingMode || "absolute");
+    setCorrectionMethod((s.correctionMethod || "phrf-tot") as CorrectionMethod);
+    setPerClassEnabled(s.perClassEnabled || false);
+    setPerClassConfig((s.perClassConfig || {}) as Record<string, ClassTimingConfig>);
+    setPortsmouthBase((s.portsmouthBase || 1000) as PortsmouthBase);
+    setUseFleetAverage(s.useFleetAverage || false);
+    setSeriesMethod((s.seriesMethod || "points") as SeriesMethod);
+    setDrops(s.drops || 0);
+    setClassFactorsByRace(s.classFactorsByRace || {});
+    setRaceWindConditions((s.raceWindConditions || {}) as Record<number, WindCondition>);
+    setClassCourseLengths((s.classCourseLengths || {}) as ClassCourseLengths);
+    if (s.visibleCols) setVisibleCols(new Set(s.visibleCols as RaceColId[]));
+    setCustomCols(s.customCols || []);
+    setTopN(s.topN || 3);
+    setDivisions((s.divisions as Division[]) || []);
+    setScoreByDivision(((s.divisions as Division[]) || []).length > 0);
+  }, [viewMode, selectedRace?.id, parentSeries?.id]);
+
+  // Save settings when they change (debounced)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!selectedRace) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const settings: ScoringSettings = {
+        timingMode,
+        correctionMethod,
+        perClassEnabled: perClassEnabled || undefined,
+        perClassConfig: perClassEnabled ? perClassConfig as Record<string, unknown> : undefined,
+        portsmouthBase,
+        useFleetAverage: useFleetAverage || undefined,
+        seriesMethod,
+        drops: drops || undefined,
+        classFactorsByRace: Object.keys(classFactorsByRace).length > 0 ? classFactorsByRace : undefined,
+        raceWindConditions: Object.keys(raceWindConditions).length > 0 ? raceWindConditions : undefined,
+        classCourseLengths: Object.keys(classCourseLengths).length > 0 ? classCourseLengths : undefined,
+        visibleCols: Array.from(visibleCols),
+        customCols: customCols.length > 0 ? customCols : undefined,
+        topN,
+        divisions: divisions.length > 0 ? divisions : undefined,
+      };
+      if (viewMode === "series" && parentSeries) {
+        updateSeriesData(parentSeries.id, parentSeries.name, { ...parentSeries.info, scoringSettings: settings });
+      } else {
+        updateRaceData(selectedRace.id, selectedRace.name, { ...selectedRace.info, scoringSettings: settings });
+      }
+    }, 2000);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [timingMode, correctionMethod, perClassEnabled, perClassConfig, portsmouthBase, useFleetAverage, seriesMethod, drops, classFactorsByRace, raceWindConditions, classCourseLengths, visibleCols, customCols, topN, divisions, viewMode]);
 
   const getWindCondition = (raceId: number): WindCondition => {
     if (raceWindConditions[raceId]) return raceWindConditions[raceId];
@@ -1322,15 +1490,6 @@ export default function ResultsTab() {
     });
   };
 
-  const parentSeries = series.find((s) =>
-    s.info.raceIds.includes(selectedRace.id)
-  );
-  const seriesRaces = parentSeries
-    ? parentSeries.info.raceIds
-        .map((id) => races.find((r) => r.id === id))
-        .filter(Boolean) as Race[]
-    : [selectedRace];
-
   const dnfPenaltyFactor = (parentSeries?.info as any)?.dnfPenaltyFactor ?? 1.5;
   const setDnfPenaltyFactor = (factor: number) => {
     if (!parentSeries) return;
@@ -1349,7 +1508,7 @@ export default function ResultsTab() {
     currentRaceCourseLengths[cls] = getClassCourseLength(selectedRace.id, cls);
   });
 
-  const raceResults = calculateRaceResults(selectedRace, boats, timingMethod, effectiveFactors, getWindCondition(selectedRace.id), currentRaceCourseLengths, portsmouthBase, useFleetAverage, perClassEnabled, perClassConfig);
+  const raceResults = calculateRaceResults(selectedRace, boats, timingMethod, effectiveFactors, getWindCondition(selectedRace.id), currentRaceCourseLengths, portsmouthBase, useFleetAverage, perClassEnabled, perClassConfig, scoreByDivision ? divisions : []);
 
   // Build course lengths for all series races
   const allSeriesCourseLengths: ClassCourseLengths = {};
@@ -1363,10 +1522,8 @@ export default function ResultsTab() {
   });
 
   const seriesResults = parentSeries && seriesRaces.length > 1
-    ? calculateSeriesResults(seriesRaces, boats, timingMethod, seriesMethod, drops, classFactorsByRace, raceWindConditions, allSeriesCourseLengths, portsmouthBase, dnfPenaltyFactor, useFleetAverage, perClassEnabled, perClassConfig)
+    ? calculateSeriesResults(seriesRaces, boats, timingMethod, seriesMethod, drops, classFactorsByRace, raceWindConditions, allSeriesCourseLengths, portsmouthBase, dnfPenaltyFactor, useFleetAverage, perClassEnabled, perClassConfig, scoreByDivision ? divisions : [])
     : null;
-
-  const hasMultipleRaces = parentSeries && seriesRaces.length > 1;
 
   return (
     <div className="results-tab">
@@ -2031,23 +2188,90 @@ export default function ResultsTab() {
             )}
 
             <div className="results-config-section">
-              <div className="start-classes-label">Show top:</div>
-              <div className="results-drops">
-                <button
-                  className="staged-time-adj"
-                  onClick={() => setTopN(Math.max(1, topN - 1))}
-                >
-                  −
-                </button>
-                <span className="results-drops-value">{topN}</span>
-                <button
-                  className="staged-time-adj"
-                  onClick={() => setTopN(topN + 1)}
-                >
-                  +
-                </button>
-              </div>
+              <label className="races-checkbox">
+                <input
+                  type="checkbox"
+                  checked={scoreByDivision}
+                  onChange={(e) => {
+                    setScoreByDivision(e.target.checked);
+                    if (e.target.checked && divisions.length === 0) {
+                      setDivisions([{ name: "Division 1", classes: [] }]);
+                      setDivisionsOpen(true);
+                    }
+                  }}
+                />
+                <span>Score by division</span>
+              </label>
             </div>
+
+            {scoreByDivision && (
+              <div className="results-config-section">
+                <button className="results-wind-toggle" onClick={() => setDivisionsOpen(!divisionsOpen)}>
+                  <span className="start-classes-label">Divisions ({divisions.length})</span>
+                  <span className={`race-card-chevron ${divisionsOpen ? "race-card-chevron--open" : ""}`}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 6 15 12 9 18" />
+                    </svg>
+                  </span>
+                </button>
+                {divisionsOpen && (
+                  <>
+                    {divisions.map((div, i) => (
+                      <div key={i} className="division-card">
+                        <div className="division-card-header">
+                          <input
+                            className="login-input division-name-input"
+                            value={div.name}
+                            onChange={(e) => {
+                              setDivisions((prev) => prev.map((d, j) => j === i ? { ...d, name: e.target.value } : d));
+                            }}
+                            placeholder="Division name"
+                          />
+                          <button
+                            className="division-remove-btn"
+                            onClick={() => setDivisions((prev) => prev.filter((_, j) => j !== i))}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <div className="division-classes">
+                          {allClasses.map((cls) => {
+                            const inThisDiv = div.classes.includes(cls);
+                            const inOtherDiv = !inThisDiv && divisions.some((d, j) => j !== i && d.classes.includes(cls));
+                            return (
+                              <button
+                                key={cls}
+                                className={`division-class-btn ${inThisDiv ? "division-class-btn--active" : ""} ${inOtherDiv ? "division-class-btn--taken" : ""}`}
+                                disabled={inOtherDiv}
+                                onClick={() => {
+                                  setDivisions((prev) => prev.map((d, j) => {
+                                    if (j !== i) return d;
+                                    return {
+                                      ...d,
+                                      classes: inThisDiv
+                                        ? d.classes.filter((c) => c !== cls)
+                                        : [...d.classes, cls],
+                                    };
+                                  }));
+                                }}
+                              >
+                                {cls}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setDivisions((prev) => [...prev, { name: `Division ${prev.length + 1}`, classes: [] }])}
+                    >
+                      + Add Division
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -2064,8 +2288,28 @@ export default function ResultsTab() {
         </button>
         {summaryOpen && (
           <>
+            <div className="results-summary-controls">
+              <div className="results-drops">
+                <span className="results-summary-controls-label">Show top</span>
+                <button className="staged-time-adj" onClick={() => setTopN(Math.max(1, topN - 1))}>−</button>
+                <span className="results-drops-value">{topN}</span>
+                <button className="staged-time-adj" onClick={() => setTopN(topN + 1)}>+</button>
+              </div>
+              <div className="results-summary-toggles">
+                <label className="races-checkbox">
+                  <input type="checkbox" checked={showClassResults} onChange={(e) => setShowClassResults(e.target.checked)} />
+                  <span>Class</span>
+                </label>
+                {scoreByDivision && divisions.length > 0 && (
+                  <label className="races-checkbox">
+                    <input type="checkbox" checked={showDivisionResults} onChange={(e) => setShowDivisionResults(e.target.checked)} />
+                    <span>Division</span>
+                  </label>
+                )}
+              </div>
+            </div>
             {viewMode === "race" && (
-              <RaceSummary results={raceResults} topN={topN} />
+              <RaceSummary results={raceResults} topN={topN} showClassResults={showClassResults} showDivisionResults={showDivisionResults && scoreByDivision && divisions.length > 0} />
             )}
             {viewMode === "series" && seriesResults && (
               <SeriesSummary results={seriesResults} topN={topN} seriesMethod={seriesMethod} />
@@ -2076,7 +2320,7 @@ export default function ResultsTab() {
 
       {/* Column toggles */}
       <ColumnToggles
-        columns={getRaceColumns(timingMethod, perClassEnabled)}
+        columns={getRaceColumns(timingMethod, perClassEnabled, scoreByDivision && divisions.length > 0)}
         visible={visibleCols}
         onToggle={toggleCol}
       />

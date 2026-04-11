@@ -72,6 +72,25 @@ export interface AssistantPermissions {
   viewResults?: boolean;
 }
 
+export interface ScoringSettings {
+  timingMode?: "absolute" | "corrected";
+  correctionMethod?: "phrf-tot" | "phrf-tod" | "portsmouth" | "irc";
+  perClassEnabled?: boolean;
+  perClassConfig?: Record<string, unknown>;
+  portsmouthBase?: number;
+  useFleetAverage?: boolean;
+  seriesMethod?: "points" | "total-time";
+  drops?: number;
+  classFactorsByRace?: Record<number, Array<{ className: string; factor: number }>>;
+  raceWindConditions?: Record<number, string>;
+  classCourseLengths?: Record<string, Record<string, number>>;
+  visibleCols?: string[];
+  customCols?: string[];
+  topN?: number;
+  dnfPenaltyFactor?: number;
+  divisions?: Array<{ name: string; classes: string[] }>;
+}
+
 export interface RaceInfo {
   name: string;
   autoCheckIn?: boolean;
@@ -83,6 +102,7 @@ export interface RaceInfo {
   customAssistants?: boolean;
   assistantPermissions?: AssistantPermissions;
   customPermissions?: boolean;
+  scoringSettings?: ScoringSettings;
   [key: string]: unknown;
 }
 
@@ -106,6 +126,7 @@ export interface SeriesInfo {
   drops?: number;
   assistants?: string[];
   assistantPermissions?: AssistantPermissions;
+  scoringSettings?: ScoringSettings;
   [key: string]: unknown;
 }
 
