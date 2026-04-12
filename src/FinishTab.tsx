@@ -465,6 +465,7 @@ function CertifyModal({
   starts,
   finishTimeDisplay,
   onCertify,
+  onCertifyAll,
   onDismissObservation,
   onClose,
 }: {
@@ -474,6 +475,7 @@ function CertifyModal({
   starts: StartInfo[];
   finishTimeDisplay: FinishTimeDisplay;
   onCertify: (boatId: number, time: number) => void;
+  onCertifyAll: (certifications: Array<{ boatId: number; time: number }>) => void;
   onDismissObservation: (obsId: number) => void;
   onClose: () => void;
 }) {
@@ -506,11 +508,12 @@ function CertifyModal({
   };
 
   const certifyAll = () => {
-    sortedBoatIds.forEach((boatId) => {
+    const certifications = sortedBoatIds.map((boatId) => {
       const obs = boatGroups.get(boatId)!;
       const avg = Math.round(obs.reduce((s, o) => s + o.observed_time, 0) / obs.length);
-      onCertify(boatId, avg);
+      return { boatId, time: avg };
     });
+    onCertifyAll(certifications);
     onClose();
   };
 
@@ -999,7 +1002,9 @@ export default function FinishTab() {
           starts={selectedRace.info.starts || []}
           finishTimeDisplay={finishTimeDisplay}
           onCertify={(boatId, time) => {
-            const updatedBoats = raceBoats.map((b) => {
+            // Single boat certification
+            const currentBoats = selectedRace.info.boats || [];
+            const updatedBoats = currentBoats.map((b) => {
               if (b.boatId !== boatId) return b;
               return { ...b, finishTime: time, status: "finished" };
             });
@@ -1010,6 +1015,25 @@ export default function FinishTab() {
               boatObs.forEach((o) => deleteFinishObservation(auth, o.id));
               setAllObservations((prev) => prev.filter((o) => o.boat_id !== boatId));
               setMyObservations((prev) => prev.filter((o) => o.boat_id !== boatId));
+            }
+          }}
+          onCertifyAll={(certifications) => {
+            // Batch certification — single update with all boats
+            const currentBoats = selectedRace.info.boats || [];
+            const certMap = new Map(certifications.map((c) => [c.boatId, c.time]));
+            const updatedBoats = currentBoats.map((b) => {
+              const certTime = certMap.get(b.boatId);
+              if (certTime == null) return b;
+              return { ...b, finishTime: certTime, status: "finished" };
+            });
+            updateRaceData(selectedRace.id, selectedRace.name, { ...selectedRace.info, boats: updatedBoats });
+            // Remove all certified observations
+            if (auth) {
+              const certifiedIds = new Set(certifications.map((c) => c.boatId));
+              const obsToDelete = allObservations.filter((o) => certifiedIds.has(o.boat_id));
+              obsToDelete.forEach((o) => deleteFinishObservation(auth, o.id));
+              setAllObservations((prev) => prev.filter((o) => !certifiedIds.has(o.boat_id)));
+              setMyObservations((prev) => prev.filter((o) => !certifiedIds.has(o.boat_id)));
             }
           }}
           onDismissObservation={(obsId) => {
