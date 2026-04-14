@@ -32,11 +32,6 @@ export default function TopBarMenu() {
   const [finishDisplay, setFinishDisplay] = useState<"clock" | "elapsed">(
     (localStorage.getItem("racemate-finish-display") as "clock" | "elapsed") || "clock"
   );
-  const [syncInterval, setSyncIntervalState] = useState<number>(() => {
-    const stored = localStorage.getItem("racemate-sync-interval");
-    if (stored) { const p = Number(stored); if (!isNaN(p) && p >= 0) return p; }
-    return 15000;
-  });
   const menuRef = useRef<HTMLDivElement>(null);
 
   const changeTheme = (t: Theme) => {
@@ -47,12 +42,6 @@ export default function TopBarMenu() {
   const changeFinishDisplay = (mode: "clock" | "elapsed") => {
     setFinishDisplay(mode);
     localStorage.setItem("racemate-finish-display", mode);
-    window.dispatchEvent(new Event("racemate-settings-changed"));
-  };
-
-  const changeSyncInterval = (ms: number) => {
-    setSyncIntervalState(ms);
-    localStorage.setItem("racemate-sync-interval", String(ms));
     window.dispatchEvent(new Event("racemate-settings-changed"));
   };
 

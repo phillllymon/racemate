@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "./AuthContext";
 import { useDataSync } from "./useDataSync";
@@ -106,7 +106,6 @@ export default function ClubsModal({ open, onClose }: ClubsModalProps) {
 
   const myClubIds = new Set(myClubs.map((c) => c.id));
   const browsableClubs = allClubs.filter((c) => !myClubIds.has(c.id));
-  const viewingClub = myClubs.find((c) => c.id === viewingClubId);
 
   if (!open) return null;
 
