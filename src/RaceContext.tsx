@@ -9,7 +9,7 @@ import {
 } from "./api";
 import type {
   RaceRecord, SeriesRecord, BoatRecord,
-  RaceInfo, SeriesInfo, BoatInfo,
+  RaceInfo, SeriesInfo, BoatInfo, RaceBoatEntry,
 } from "./api";
 
 // ---- Parsed types ----
@@ -62,10 +62,15 @@ interface RaceContextValue {
   updateBoatData: (boatId: number, name: string, info: BoatInfo) => void;
   updateRaceData: (raceId: number, name: string, info: RaceInfo) => void;
   updateSeriesData: (seriesId: number, name: string, info: SeriesInfo) => void;
+  patchRaceInfo: (raceId: number, patch: Partial<RaceInfo>) => void;
+  patchSeriesInfo: (seriesId: number, patch: Partial<SeriesInfo>) => void;
+  updateBoatInRace: (raceId: number, boatId: number, updater: (boat: RaceBoatEntry) => RaceBoatEntry) => void;
+  updateBoatsInRace: (raceId: number, updater: (boats: RaceBoatEntry[]) => RaceBoatEntry[]) => void;
   softDeleteBoat: (boatId: number) => void;
   removeRace: (raceId: number) => Promise<void>;
   removeSeries: (seriesId: number) => Promise<void>;
   refreshAll: () => Promise<void>;
+  refreshSelectedRace: () => Promise<void>;
 }
 
 const RaceContext = createContext<RaceContextValue | null>(null);
@@ -194,6 +199,35 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     refreshAll();
   }, [user?.id]);
 
+  // Periodically refresh the selected race data to pick up changes from other users
+  useEffect(() => {
+    if (!auth || selectedRaceId == null) return;
+    const interval = (() => {
+      const stored = localStorage.getItem("racemate-sync-interval");
+      if (stored) {
+        const parsed = Number(stored);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+        if (stored === "off" || stored === "0") return 0;
+      }
+      return 15000;
+    })();
+    if (interval <= 0) return;
+
+    const timer = setInterval(async () => {
+      try {
+        const res = await getRacesByColumn(auth, "id", selectedRaceId);
+        if (res.results.length === 1) {
+          const fresh = parseRecord<RaceInfo>(res.results[0]);
+          setRaces((prev) => prev.map((r) => r.id === selectedRaceId ? fresh : r));
+        }
+      } catch {
+        // ignore
+      }
+    }, interval);
+
+    return () => clearInterval(timer);
+  }, [selectedRaceId, auth?.userId, auth?.token]);
+
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -203,6 +237,20 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const selectedRace = races.find((r) => r.id === selectedRaceId) || null;
+
+  // Lightweight refresh of just the selected race (for periodic polling)
+  const refreshSelectedRace = useCallback(async () => {
+    if (!auth || !selectedRaceId) return;
+    try {
+      const res = await getRacesByColumn(auth, "id", selectedRaceId);
+      if (res.results.length === 1) {
+        const fresh = parseRecord<RaceInfo>(res.results[0]);
+        setRaces((prev) => prev.map((r) => r.id === fresh.id ? fresh : r));
+      }
+    } catch {
+      // Keep existing state
+    }
+  }, [auth?.userId, auth?.token, selectedRaceId]);
 
   const createSeries = async (name: string, info?: Partial<SeriesInfo>): Promise<Series> => {
     if (!auth) throw new Error("Not authenticated");
@@ -393,6 +441,71 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Patch functions read the freshest state at write time to avoid stale overwrites
+  const patchRaceInfo = (raceId: number, patch: Partial<RaceInfo>) => {
+    setRaces((prev) => {
+      const race = prev.find((r) => r.id === raceId);
+      if (!race) return prev;
+      const merged = { ...race.info, ...patch };
+      if (auth) {
+        const raceBoats = (merged.boats || []) as RaceBoatEntry[];
+        const hasTempBoats = raceBoats.some((rb: RaceBoatEntry) => rb.boatId < 0);
+        if (!hasTempBoats) {
+          queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, merged));
+        }
+      }
+      return prev.map((r) => r.id === raceId ? { ...r, info: merged } : r);
+    });
+  };
+
+  const patchSeriesInfo = (seriesId: number, patch: Partial<SeriesInfo>) => {
+    setSeries((prev) => {
+      const s = prev.find((s) => s.id === seriesId);
+      if (!s) return prev;
+      const merged = { ...s.info, ...patch };
+      if (auth) {
+        queueUpdate(`series-${seriesId}`, () => updateSeries(auth, seriesId, s.name, merged));
+      }
+      return prev.map((s) => s.id === seriesId ? { ...s, info: merged } : s);
+    });
+  };
+
+  // Update a single boat within a race, reading freshest state
+  const updateBoatInRace = (raceId: number, boatId: number, updater: (boat: RaceBoatEntry) => RaceBoatEntry) => {
+    setRaces((prev) => {
+      const race = prev.find((r) => r.id === raceId);
+      if (!race) return prev;
+      const currentBoats = (race.info.boats || []) as RaceBoatEntry[];
+      const updatedBoats = currentBoats.map((b) => b.boatId === boatId ? updater(b) : b);
+      const merged = { ...race.info, boats: updatedBoats };
+      if (auth) {
+        const hasTempBoats = updatedBoats.some((rb) => rb.boatId < 0);
+        if (!hasTempBoats) {
+          queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, merged));
+        }
+      }
+      return prev.map((r) => r.id === raceId ? { ...r, info: merged } : r);
+    });
+  };
+
+  // Update all boats within a race, reading freshest state
+  const updateBoatsInRace = (raceId: number, updater: (boats: RaceBoatEntry[]) => RaceBoatEntry[]) => {
+    setRaces((prev) => {
+      const race = prev.find((r) => r.id === raceId);
+      if (!race) return prev;
+      const currentBoats = (race.info.boats || []) as RaceBoatEntry[];
+      const updatedBoats = updater(currentBoats);
+      const merged = { ...race.info, boats: updatedBoats };
+      if (auth) {
+        const hasTempBoats = updatedBoats.some((rb) => rb.boatId < 0);
+        if (!hasTempBoats) {
+          queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, merged));
+        }
+      }
+      return prev.map((r) => r.id === raceId ? { ...r, info: merged } : r);
+    });
+  };
+
   // Soft delete a boat (marks as deleted, keeps record for historical races)
   const softDeleteBoat = (boatId: number) => {
     setBoats((prev) =>
@@ -476,8 +589,11 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         selectRace: setSelectedRaceId,
         createSeries, createRace, createBoat,
         updateBoatData, updateRaceData, updateSeriesData,
+        patchRaceInfo, patchSeriesInfo,
+        updateBoatInRace, updateBoatsInRace,
         softDeleteBoat, removeRace, removeSeries,
         refreshAll,
+        refreshSelectedRace,
       }}
     >
       {children}

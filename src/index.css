@@ -4040,3 +4040,25 @@ body {
 .results-summary-toggles .races-checkbox span {
   font-size: 0.8rem;
 }
+
+/* ---- Sync interval settings ---- */
+
+.settings-sync-options {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.settings-sync-options .start-mode-btn {
+  flex: 1;
+}
+
+/* ---- Sync interval settings ---- */
+
+.settings-sync-options {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.settings-sync-options .start-mode-btn {
+  flex: 1;
+}

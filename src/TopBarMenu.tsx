@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "./AuthContext";
 import ClubsModal from "./ClubsModal";
+import { getSyncInterval, setSyncInterval } from "./useDataSync";
 
 type Theme = "dark" | "light" | "highcontrast";
 
@@ -31,6 +32,11 @@ export default function TopBarMenu() {
   const [finishDisplay, setFinishDisplay] = useState<"clock" | "elapsed">(
     (localStorage.getItem("racemate-finish-display") as "clock" | "elapsed") || "clock"
   );
+  const [syncInterval, setSyncIntervalState] = useState<number>(() => {
+    const stored = localStorage.getItem("racemate-sync-interval");
+    if (stored) { const p = Number(stored); if (!isNaN(p) && p >= 0) return p; }
+    return 15000;
+  });
   const menuRef = useRef<HTMLDivElement>(null);
 
   const changeTheme = (t: Theme) => {
@@ -41,6 +47,12 @@ export default function TopBarMenu() {
   const changeFinishDisplay = (mode: "clock" | "elapsed") => {
     setFinishDisplay(mode);
     localStorage.setItem("racemate-finish-display", mode);
+    window.dispatchEvent(new Event("racemate-settings-changed"));
+  };
+
+  const changeSyncInterval = (ms: number) => {
+    setSyncIntervalState(ms);
+    localStorage.setItem("racemate-sync-interval", String(ms));
     window.dispatchEvent(new Event("racemate-settings-changed"));
   };
 
@@ -150,6 +162,30 @@ export default function TopBarMenu() {
                   >
                     Elapsed Time
                   </button>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-section-label">Data Sync Interval</div>
+                <div className="settings-sync-options">
+                  {[
+                    { label: "5s", value: 5000 },
+                    { label: "15s", value: 15000 },
+                    { label: "30s", value: 30000 },
+                    { label: "Off", value: 0 },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      className={`start-mode-btn ${getSyncInterval() === opt.value ? "start-mode-btn--active" : ""}`}
+                      onClick={() => {
+                        setSyncInterval(opt.value);
+                        // Force re-render to update active state
+                        changeFinishDisplay(finishDisplay);
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>

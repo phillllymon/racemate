@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { useRaces } from "./RaceContext";
 import { useAuth } from "./AuthContext";
 import type { Race, Boat } from "./RaceContext";
-import type { RaceBoatEntry, StartInfo, ScoringSettings } from "./api";
+import type { RaceBoatEntry, StartInfo, ScoringSettings, RaceInfo } from "./api";
 import { getFinishObservations } from "./api";
 
 // ---- Resizable split panel ----
@@ -788,7 +788,6 @@ function SeriesResultsView({
   seriesMethod: SeriesMethod;
   visibleCols: Set<RaceColId>;
   customCols: string[];
-  timingMethod: string;
   topN: number;
 }) {
   const show = (id: RaceColId) => visibleCols.has(id);
@@ -1294,7 +1293,7 @@ function exportSeriesCSVWithSummary(
 // ---- Main ResultsTab ----
 
 export default function ResultsTab() {
-  const { selectedRace, races, series, boats, updateSeriesData, updateRaceData } = useRaces();
+  const { selectedRace, races, series, boats, updateSeriesData, patchRaceInfo, patchSeriesInfo } = useRaces();
   const { user, token } = useAuth();
   const auth = user && token ? { userId: user.id, token } : null;
   const [viewMode, setViewMode] = useState<"race" | "series">("race");
@@ -1410,9 +1409,9 @@ export default function ResultsTab() {
         divisions: divisions.length > 0 ? divisions : undefined,
       };
       if (viewMode === "series" && parentSeries) {
-        updateSeriesData(parentSeries.id, parentSeries.name, { ...parentSeries.info, scoringSettings: settings });
+        patchSeriesInfo(parentSeries.id, { scoringSettings: settings });
       } else {
-        updateRaceData(selectedRace.id, selectedRace.name, { ...selectedRace.info, scoringSettings: settings });
+        patchRaceInfo(selectedRace.id, { scoringSettings: settings });
       }
     }, 2000);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
@@ -1427,11 +1426,7 @@ export default function ResultsTab() {
   };
   const setWindForRace = (raceId: number, wind: WindCondition) => {
     setRaceWindConditions((prev) => ({ ...prev, [raceId]: wind }));
-    // Also persist to race record
-    const race = races.find((r) => r.id === raceId);
-    if (race) {
-      updateRaceData(raceId, race.name, { ...race.info, windCondition: wind });
-    }
+    patchRaceInfo(raceId, { windCondition: wind } as Partial<RaceInfo>);
   };
 
   const getClassCourseLength = (raceId: number, cls: string): number => {
@@ -2377,7 +2372,6 @@ export default function ResultsTab() {
           seriesMethod={seriesMethod}
           visibleCols={visibleCols}
           customCols={customCols}
-          timingMethod={timingMethod}
           topN={topN}
         />
       )}

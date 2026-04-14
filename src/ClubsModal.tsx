@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "./AuthContext";
+import { useDataSync } from "./useDataSync";
 import {
   createClub, getAllClubs, getMyClubs, getClubMembers, joinClub, leaveClub,
 } from "./api";
@@ -45,9 +46,7 @@ export default function ClubsModal({ open, onClose }: ClubsModalProps) {
     setLoading(false);
   }, [auth?.userId, auth?.token]);
 
-  useEffect(() => {
-    if (open) refresh();
-  }, [open]);
+  useDataSync(refresh, [auth?.userId], open && !!auth);
 
   const handleCreate = async () => {
     if (!auth || !newClubName.trim()) return;
@@ -107,6 +106,7 @@ export default function ClubsModal({ open, onClose }: ClubsModalProps) {
 
   const myClubIds = new Set(myClubs.map((c) => c.id));
   const browsableClubs = allClubs.filter((c) => !myClubIds.has(c.id));
+  const viewingClub = myClubs.find((c) => c.id === viewingClubId);
 
   if (!open) return null;
 
