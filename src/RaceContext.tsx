@@ -86,6 +86,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
 
   // Sync queue
   const pendingUpdates = useRef<Map<string, () => Promise<unknown>>>(new Map());
+  const inFlightKeys = useRef<Set<string>>(new Set());
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Pending boats: temp ID boats waiting for server confirmation
@@ -98,6 +99,11 @@ export function RaceProvider({ children }: { children: ReactNode }) {
 
   const auth = user && token ? { userId: user.id, token } : null;
 
+  // Check if a key has pending or in-flight writes
+  const hasPendingWrite = useCallback((key: string) => {
+    return pendingUpdates.current.has(key) || inFlightKeys.current.has(key);
+  }, []);
+
   // Flush pending updates to backend
   const flush = useCallback(async () => {
     if (pendingUpdates.current.size === 0) {
@@ -106,6 +112,9 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     }
     const batch = new Map(pendingUpdates.current);
     pendingUpdates.current.clear();
+
+    // Track in-flight keys
+    batch.forEach((_, key) => inFlightKeys.current.add(key));
 
     try {
       const promises = Array.from(batch.values()).map((fn) => fn());
@@ -118,6 +127,9 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         }
       });
     }
+
+    // Clear in-flight keys
+    batch.forEach((_, key) => inFlightKeys.current.delete(key));
 
     if (pendingUpdates.current.size === 0 && pendingBoatsRef.current.size === 0) {
       setSynced(true);
@@ -214,13 +226,13 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     if (interval <= 0) return;
 
     const timer = setInterval(async () => {
-      // Don't overwrite local data if we have pending writes for this race
-      if (pendingUpdates.current.has(`race-${selectedRaceId}`)) return;
+      // Don't overwrite local data if we have pending or in-flight writes for this race
+      if (hasPendingWrite(`race-${selectedRaceId}`)) return;
       try {
         const res = await getRacesByColumn(auth, "id", selectedRaceId);
         if (res.results.length === 1) {
-          // Double-check no pending writes appeared during the fetch
-          if (pendingUpdates.current.has(`race-${selectedRaceId}`)) return;
+          // Double-check no writes appeared during the fetch
+          if (hasPendingWrite(`race-${selectedRaceId}`)) return;
           const fresh = parseRecord<RaceInfo>(res.results[0]);
           setRaces((prev) => prev.map((r) => r.id === selectedRaceId ? fresh : r));
         }
