@@ -214,9 +214,13 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     if (interval <= 0) return;
 
     const timer = setInterval(async () => {
+      // Don't overwrite local data if we have pending writes for this race
+      if (pendingUpdates.current.has(`race-${selectedRaceId}`)) return;
       try {
         const res = await getRacesByColumn(auth, "id", selectedRaceId);
         if (res.results.length === 1) {
+          // Double-check no pending writes appeared during the fetch
+          if (pendingUpdates.current.has(`race-${selectedRaceId}`)) return;
           const fresh = parseRecord<RaceInfo>(res.results[0]);
           setRaces((prev) => prev.map((r) => r.id === selectedRaceId ? fresh : r));
         }
@@ -255,10 +259,21 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   const createSeries = async (name: string, info?: Partial<SeriesInfo>): Promise<Series> => {
     if (!auth) throw new Error("Not authenticated");
     const seriesInfo: SeriesInfo = { name, raceIds: [], ...info };
-    const res = await addSeries(auth, name, seriesInfo);
-    const created = parseRecord<SeriesInfo>(res.series[0]);
-    setSeries((prev) => [...prev, created]);
-    return created;
+    // Optimistic: add to local state with temp ID immediately
+    const tempId = -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
+    const optimistic: Series = { id: tempId, name, info: seriesInfo };
+    setSeries((prev) => [...prev, optimistic]);
+    // Create on server, then swap temp ID with real ID
+    try {
+      const res = await addSeries(auth, name, seriesInfo);
+      const created = parseRecord<SeriesInfo>(res.series[0]);
+      setSeries((prev) => prev.map((s) => s.id === tempId ? created : s));
+      return created;
+    } catch {
+      // Remove optimistic entry on failure
+      setSeries((prev) => prev.filter((s) => s.id !== tempId));
+      throw new Error("Failed to create series");
+    }
   };
 
   const createRace = async (
@@ -268,37 +283,70 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   ): Promise<Race> => {
     if (!auth) throw new Error("Not authenticated");
     const raceInfo: RaceInfo = { name, boats: [], starts: [], ...info };
-    const res = await addRace(auth, name, raceInfo);
-    const created = parseRecord<RaceInfo>(res.race[0]);
-    setRaces((prev) => [...prev, created]);
-    setSelectedRaceId(created.id);
+    // Optimistic: add to local state with temp ID immediately
+    const tempId = -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
+    const optimistic: Race = { id: tempId, name, info: raceInfo };
+    setRaces((prev) => [...prev, optimistic]);
+    setSelectedRaceId(tempId);
 
-    // If creating inside a series, add raceId to the series
+    // If creating inside a series, optimistically add to series
     if (seriesId !== null) {
       setSeries((prev) =>
         prev.map((s) => {
           if (s.id !== seriesId) return s;
-          const updated = {
-            ...s,
-            info: { ...s.info, raceIds: [...s.info.raceIds, created.id] },
-          };
-          queueUpdate(`series-${s.id}`, () =>
-            updateSeries(auth, s.id, s.name, updated.info)
-          );
-          return updated;
+          return { ...s, info: { ...s.info, raceIds: [...s.info.raceIds, tempId] } };
         })
-      );
-    } else {
-      // Wrap in a placeholder series
-      const seriesName = `${name} Series`;
-      const placeholder = await createSeries(seriesName, { raceIds: [created.id] });
-      // Update local reference
-      setSeries((prev) =>
-        prev.map((s) => (s.id === placeholder.id ? { ...s, info: { ...s.info, raceIds: [created.id] } } : s))
       );
     }
 
-    return created;
+    // Create on server, then swap temp ID with real ID
+    try {
+      const res = await addRace(auth, name, raceInfo);
+      const created = parseRecord<RaceInfo>(res.race[0]);
+
+      // Swap temp ID in races
+      setRaces((prev) => prev.map((r) => r.id === tempId ? created : r));
+      setSelectedRaceId(created.id);
+
+      // Swap temp ID in parent series
+      if (seriesId !== null) {
+        setSeries((prev) =>
+          prev.map((s) => {
+            if (s.id !== seriesId) return s;
+            const updated = {
+              ...s,
+              info: { ...s.info, raceIds: s.info.raceIds.map((id) => id === tempId ? created.id : id) },
+            };
+            queueUpdate(`series-${s.id}`, () =>
+              updateSeries(auth, s.id, s.name, updated.info)
+            );
+            return updated;
+          })
+        );
+      } else {
+        // Create a placeholder series
+        const seriesName = `${name} Series`;
+        const placeholder = await createSeries(seriesName, { raceIds: [created.id] });
+        setSeries((prev) =>
+          prev.map((s) => (s.id === placeholder.id ? { ...s, info: { ...s.info, raceIds: [created.id] } } : s))
+        );
+      }
+
+      return created;
+    } catch {
+      // Remove optimistic entries on failure
+      setRaces((prev) => prev.filter((r) => r.id !== tempId));
+      if (seriesId !== null) {
+        setSeries((prev) =>
+          prev.map((s) => {
+            if (s.id !== seriesId) return s;
+            return { ...s, info: { ...s.info, raceIds: s.info.raceIds.filter((id) => id !== tempId) } };
+          })
+        );
+      }
+      setSelectedRaceId(null);
+      throw new Error("Failed to create race");
+    }
   };
 
   const generateTempId = (): number => {
