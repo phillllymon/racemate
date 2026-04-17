@@ -14,72 +14,50 @@ const SpeechRecognition =
 export default function SearchBar({ value, onChange, placeholder, className }: SearchBarProps) {
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<any>(null);
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isHoldingRef = useRef(false);
-
-  const supportsVoice = !!SpeechRecognition;
-
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
+  const supportsVoice = !!SpeechRecognition;
+
   const stopListening = useCallback(() => {
     setListening(false);
-    isHoldingRef.current = false;
     if (recognitionRef.current) {
       try { recognitionRef.current.abort(); } catch { /* ignore */ }
       recognitionRef.current = null;
     }
   }, []);
 
-  const startListening = useCallback(() => {
-    if (!SpeechRecognition) { console.log("[Voice] SpeechRecognition not supported"); return; }
-
-    // Stop any existing session
+  const toggleListening = useCallback(() => {
+    // If currently listening, stop
     if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch { /* ignore */ }
+      stopListening();
+      return;
     }
+
+    if (!SpeechRecognition) return;
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
-    recognition.onstart = () => {
-      console.log("[Voice] Recognition started");
-    };
-
     recognition.onresult = (event: any) => {
       let transcript = "";
       for (let i = 0; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript;
       }
-      console.log("[Voice] Result:", transcript);
       onChangeRef.current(transcript);
     };
 
     recognition.onerror = (event: any) => {
-      console.log("[Voice] Error:", event.error);
       if (event.error !== "aborted") {
         stopListening();
       }
     };
 
     recognition.onend = () => {
-      console.log("[Voice] Ended, still holding:", isHoldingRef.current);
-      if (isHoldingRef.current) {
-        try { recognition.start(); } catch { stopListening(); }
-      } else {
-        setListening(false);
-        recognitionRef.current = null;
-      }
-    };
-
-    recognition.onspeechstart = () => {
-      console.log("[Voice] Speech detected");
-    };
-
-    recognition.onnomatch = () => {
-      console.log("[Voice] No match");
+      setListening(false);
+      recognitionRef.current = null;
     };
 
     recognitionRef.current = recognition;
@@ -87,9 +65,7 @@ export default function SearchBar({ value, onChange, placeholder, className }: S
 
     try {
       recognition.start();
-      console.log("[Voice] Called start()");
-    } catch (e) {
-      console.log("[Voice] Start failed:", e);
+    } catch {
       stopListening();
     }
   }, [stopListening]);
@@ -98,33 +74,10 @@ export default function SearchBar({ value, onChange, placeholder, className }: S
   useEffect(() => {
     return () => {
       if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch { /* ignore */ }
+        try { recognitionRef.current.abort(); } catch { /* ignore */ }
       }
-      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
     };
   }, []);
-
-  const handlePointerDown = useCallback(() => {
-    isHoldingRef.current = true;
-    // Small delay to distinguish tap from hold
-    holdTimerRef.current = setTimeout(() => {
-      if (isHoldingRef.current) {
-        startListening();
-      }
-    }, 150);
-  }, [startListening]);
-
-  const handlePointerUp = useCallback(() => {
-    isHoldingRef.current = false;
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    // If we were listening, stop
-    if (recognitionRef.current) {
-      stopListening();
-    }
-  }, [stopListening]);
 
   return (
     <div className={`search-bar ${className || ""}`}>
@@ -149,10 +102,7 @@ export default function SearchBar({ value, onChange, placeholder, className }: S
       {supportsVoice && (
         <button
           className={`search-bar-mic ${listening ? "search-bar-mic--active" : ""}`}
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-          onContextMenu={(e) => e.preventDefault()}
+          onClick={toggleListening}
           aria-label="Voice search"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
