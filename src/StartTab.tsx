@@ -4,6 +4,7 @@ import { useRaces } from "./RaceContext";
 import { useTime } from "./TimeContext";
 import type { StartInfo, SequenceStep, RaceBoatEntry } from "./api";
 import type { Boat } from "./RaceContext";
+import SearchBar from "./SearchBar";
 
 // ---- Helpers ----
 
@@ -583,11 +584,10 @@ function PostStartPanel({
       <div className="post-start-divider">
         {overEarlyBoats.length > 0 ? "Mark more boats over early:" : "Select boats over the line early:"}
       </div>
-      <input
-        className="login-input"
-        placeholder="Search boats..."
+      <SearchBar
         value={ocsSearch}
-        onChange={(e) => setOcsSearch(e.target.value)}
+        onChange={setOcsSearch}
+        placeholder="Search boats..."
       />
       <div className="post-start-scroll">
         {filteredRacing.map((rb) => {
@@ -939,11 +939,10 @@ function StartCard({
           </button>
           {showBoats && (
             <>
-              <input
-                className="login-input"
-                placeholder="Search boats..."
+              <SearchBar
                 value={boatSearch}
-                onChange={(e) => setBoatSearch(e.target.value)}
+                onChange={setBoatSearch}
+                placeholder="Search boats..."
               />
               <BoatCheckInList
                 boats={allBoats}

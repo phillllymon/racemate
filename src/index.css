@@ -4062,3 +4062,79 @@ body {
 .settings-sync-options .start-mode-btn {
   flex: 1;
 }
+
+/* ---- Search bar with voice and clear ---- */
+
+.search-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-bar-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 74px 0 0.75rem;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  color: var(--white);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.search-bar-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-bar-input:focus {
+  border-color: var(--sky);
+}
+
+.search-bar-clear,
+.search-bar-mic {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 36px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.search-bar-clear {
+  right: 36px;
+}
+
+.search-bar-clear:active {
+  color: var(--white);
+}
+
+.search-bar-mic:active,
+.search-bar-mic--active {
+  color: var(--orange);
+}
+
+.search-bar-mic--active {
+  animation: mic-pulse 1s infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* When there's no clear button, don't overlap padding */
+.search-bar-input:placeholder-shown ~ .search-bar-mic {
+  right: 0;
+}

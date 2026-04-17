@@ -7,6 +7,7 @@ import { useDataSync } from "./useDataSync";
 import type { Boat } from "./RaceContext";
 import type { RaceBoatEntry, FinishObservation } from "./api";
 import { addFinishObservation, getFinishObservations, deleteFinishObservation } from "./api";
+import SearchBar from "./SearchBar";
 
 // ---- Types ----
 
@@ -429,11 +430,10 @@ function StagedBoatRow({
       {/* Assign boat to MARK entry */}
       {isUnidentified && showAssign && (
         <div className="staged-assign">
-          <input
-            className="login-input"
-            placeholder="Search to assign boat..."
+          <SearchBar
             value={assignSearch}
-            onChange={(e) => setAssignSearch(e.target.value)}
+            onChange={setAssignSearch}
+            placeholder="Search to assign boat..."
           />
           {assignResults.map((rb) => {
             const b = allBoats.find((bt) => bt.id === rb.boatId);
@@ -917,11 +917,11 @@ export default function FinishTab() {
       </div>
 
       {/* Search */}
-      <input
-        className="login-input finish-search-input"
-        placeholder="Search boats to stage..."
+      <SearchBar
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={setSearch}
+        placeholder="Search boats to stage..."
+        className="finish-search-input"
       />
 
       <SearchResults

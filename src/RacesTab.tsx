@@ -7,6 +7,7 @@ import type { Race, Series, Boat } from "./RaceContext";
 import type { BoatInfo, RaceBoatEntry, RaceInfo, ClubMember, AssistantPermissions } from "./api";
 import { getMyClubs, getClubMembers } from "./api";
 import SpreadsheetImport from "./SpreadsheetImport";
+import SearchBar from "./SearchBar";
 
 // ---- Confirmation modal ----
 
@@ -540,11 +541,10 @@ function AddBoatForm({
   if (mode === "existing") {
     return (
       <div className="races-form">
-        <input
-          className="login-input"
-          placeholder="Search boats..."
+        <SearchBar
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={setSearch}
+          placeholder="Search boats..."
         />
         <div className="races-boat-list">
           {filteredExisting.length === 0 && (
