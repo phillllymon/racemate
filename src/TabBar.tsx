@@ -1,4 +1,4 @@
-export type TabId = "races" | "start" | "chart" | "finish" | "results";
+export type TabId = "races" | "checkin" | "start" | "chart" | "finish" | "results";
 
 interface Tab {
   id: TabId;
@@ -7,6 +7,7 @@ interface Tab {
 
 const TABS: Tab[] = [
   { id: "races", label: "Series" },
+  { id: "checkin", label: "Check-In" },
   { id: "start", label: "Start" },
   { id: "chart", label: "Chart" },
   { id: "finish", label: "Finish" },

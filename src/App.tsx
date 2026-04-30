@@ -6,6 +6,7 @@ import LoginPage from "./LoginPage";
 import TopBar from "./TopBar";
 import TabBar from "./TabBar";
 import RacesTab from "./RacesTab";
+import CheckInTab from "./CheckInTab";
 import StartTab from "./StartTab";
 import ChartTab from "./ChartTab";
 import FinishTab from "./FinishTab";
@@ -35,6 +36,9 @@ function MainApp() {
         <div className="app-body">
           <div className={`app-tab-pane ${activeTab === "races" ? "app-tab-pane--active" : ""}`}>
             <RacesTab />
+          </div>
+          <div className={`app-tab-pane ${activeTab === "checkin" ? "app-tab-pane--active" : ""}`}>
+            <CheckInTab />
           </div>
           <div className={`app-tab-pane ${activeTab === "start" ? "app-tab-pane--active" : ""}`}>
             <StartTab />

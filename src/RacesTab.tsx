@@ -960,9 +960,8 @@ function PermissionsPicker({
 
 // ---- Race card ----
 
-function RaceCard({ race, onSelect, parentSeries }: { race: Race; onSelect: () => void; parentSeries?: Series }) {
+function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race: Race; onSelect: () => void; parentSeries?: Series; isExpanded: boolean; onToggle: () => void }) {
   const { selectedRaceId, selectRace, updateRaceData, boats, removeRace } = useRaces();
-  const [expanded, setExpanded] = useState(false);
   const [editingBoatId, setEditingBoatId] = useState<number | null>(null);
   const [editingRace, setEditingRace] = useState(false);
   const [addingClass, setAddingClass] = useState(false);
@@ -1045,18 +1044,18 @@ function RaceCard({ race, onSelect, parentSeries }: { race: Race; onSelect: () =
   return (
     <div className={`race-card ${isSelected ? "race-card--selected" : ""}`}>
       <div className="race-card-header">
-        <button className="race-card-header-toggle" onClick={() => setExpanded(!expanded)}>
+        <button className="race-card-header-toggle" onClick={onToggle}>
           <span className="race-card-name">{race.name}</span>
           <span className="race-card-count">
             {classNames.length} class{classNames.length !== 1 ? "es" : ""} · {raceBoats.length} boat{raceBoats.length !== 1 ? "s" : ""}
           </span>
-          <span className={`race-card-chevron ${expanded ? "race-card-chevron--open" : ""}`}>
+          <span className={`race-card-chevron ${isExpanded ? "race-card-chevron--open" : ""}`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="9 6 15 12 9 18" />
             </svg>
           </span>
         </button>
-        {expanded && !editingRace && (
+        {isExpanded && !editingRace && (
           <button className="card-edit-btn" onClick={startEditingRace} aria-label="Edit race">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -1066,7 +1065,7 @@ function RaceCard({ race, onSelect, parentSeries }: { race: Race; onSelect: () =
         )}
       </div>
 
-      {expanded && (
+      {isExpanded && (
         <div className="race-card-body">
           {!isSelected && (
             <button className="btn btn-primary" onClick={() => { selectRace(race.id); onSelect(); }}>
@@ -1238,15 +1237,15 @@ function RaceCard({ race, onSelect, parentSeries }: { race: Race; onSelect: () =
 
 // ---- Series card ----
 
-function SeriesCard({ s }: { s: Series }) {
+function SeriesCard({ s, isExpanded, onToggle }: { s: Series; isExpanded: boolean; onToggle: () => void }) {
   const { races, selectRace, updateSeriesData, updateRaceData, removeSeries } = useRaces();
-  const [expanded, setExpanded] = useState(false);
   const [addingRace, setAddingRace] = useState(false);
   const [editingSeries, setEditingSeries] = useState(false);
   const [editName, setEditName] = useState(s.name);
   const [confirmDeleteSeries, setConfirmDeleteSeries] = useState(false);
   const [seriesAssistants, setSeriesAssistants] = useState<string[]>([]);
   const [seriesPermissions, setSeriesPermissions] = useState<AssistantPermissions>(DEFAULT_PERMISSIONS);
+  const [expandedRaceId, setExpandedRaceId] = useState<number | null>(null);
 
   const seriesRaces = s.info.raceIds
     .map((id) => races.find((r) => r.id === id))
@@ -1282,16 +1281,16 @@ function SeriesCard({ s }: { s: Series }) {
   return (
     <div className="series-card">
       <div className="series-card-header">
-        <button className="race-card-header-toggle" onClick={() => setExpanded(!expanded)}>
+        <button className="race-card-header-toggle" onClick={onToggle}>
           <span className="series-card-name">{s.name}</span>
           <span className="series-card-count">{seriesRaces.length} race{seriesRaces.length !== 1 ? "s" : ""}</span>
-          <span className={`race-card-chevron ${expanded ? "race-card-chevron--open" : ""}`}>
+          <span className={`race-card-chevron ${isExpanded ? "race-card-chevron--open" : ""}`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="9 6 15 12 9 18" />
             </svg>
           </span>
         </button>
-        {expanded && !editingSeries && (
+        {isExpanded && !editingSeries && (
           <button className="card-edit-btn" onClick={startEditingSeries} aria-label="Edit series">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -1301,7 +1300,7 @@ function SeriesCard({ s }: { s: Series }) {
         )}
       </div>
 
-      {expanded && (
+      {isExpanded && (
         <div className="series-card-body">
           {editingSeries ? (
             <div className="races-form">
@@ -1346,7 +1345,14 @@ function SeriesCard({ s }: { s: Series }) {
           ) : (
             <>
               {seriesRaces.map((race) => (
-                <RaceCard key={race.id} race={race} onSelect={() => selectRace(race.id)} parentSeries={s} />
+                <RaceCard
+                  key={race.id}
+                  race={race}
+                  onSelect={() => selectRace(race.id)}
+                  parentSeries={s}
+                  isExpanded={expandedRaceId === race.id}
+                  onToggle={() => setExpandedRaceId(expandedRaceId === race.id ? null : race.id)}
+                />
               ))}
 
               {seriesRaces.length === 0 && !addingRace && (
@@ -1377,6 +1383,7 @@ function SeriesCard({ s }: { s: Series }) {
 export default function RacesTab() {
   const { series, loading } = useRaces();
   const [showForm, setShowForm] = useState(false);
+  const [expandedSeriesId, setExpandedSeriesId] = useState<number | null>(null);
 
   if (loading) {
     return <div className="tab-placeholder"><p>Loading...</p></div>;
@@ -1400,7 +1407,12 @@ export default function RacesTab() {
       )}
 
       {series.map((s) => (
-        <SeriesCard key={s.id} s={s} />
+        <SeriesCard
+          key={s.id}
+          s={s}
+          isExpanded={expandedSeriesId === s.id}
+          onToggle={() => setExpandedSeriesId(expandedSeriesId === s.id ? null : s.id)}
+        />
       ))}
     </div>
   );

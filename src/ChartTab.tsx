@@ -326,6 +326,13 @@ export default function ChartTab() {
       {/* Map container */}
       <div className="chart-map-container" ref={mapRef} />
 
+      {/* Center crosshairs */}
+      <div className="chart-crosshairs" aria-hidden="true">
+        <div className="chart-crosshair-v" />
+        <div className="chart-crosshair-h" />
+        <div className="chart-crosshair-dot" />
+      </div>
+
       {/* Position info overlay */}
       <div className="chart-info-overlay">
         {error && <div className="chart-error">{error}</div>}

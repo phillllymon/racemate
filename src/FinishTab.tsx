@@ -18,6 +18,7 @@ interface StagedBoat {
   finishTime: number | null;
   lastFinishTime: number | null; // remembers time after reset
   id: string; // unique key for list stability
+  finishedAt: number | null; // timestamp when finish was recorded, for auto-dismiss
 }
 
 function generateId(): string {
@@ -338,8 +339,13 @@ function StagedBoatRow({
     ? `Lap ${lapInfo.lapsCompleted + 1}`
     : "Finish";
 
+  const isAutoDismissing = staged.finishedAt != null;
+
   return (
-    <div className={`staged-row ${isFinished ? "staged-row--finished" : ""} ${isIntermediateLap ? "staged-row--lapped" : ""} ${flash ? "staged-row--flash" : ""}`}>
+    <div className={`staged-row ${isFinished ? "staged-row--finished" : ""} ${isIntermediateLap ? "staged-row--lapped" : ""} ${flash ? "staged-row--flash" : ""} ${isAutoDismissing ? "staged-row--dismissing" : ""}`}>
+      {isAutoDismissing && (
+        <div className="staged-dismiss-bar" style={{ animationDuration: "15s" }} />
+      )}
       <div className="staged-row-main">
         {/* Reorder buttons */}
         <div className="staged-arrows">
@@ -673,6 +679,22 @@ export default function FinishTab() {
   const [staged, setStaged] = useState<StagedBoat[]>([]);
   const [stagingOpen, setStagingOpen] = useState(true);
 
+  // Auto-dismiss finished boats after 15 seconds
+  useEffect(() => {
+    const finishedEntries = staged.filter((s) => s.finishedAt != null);
+    if (finishedEntries.length === 0) return;
+
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setStaged((prev) => prev.filter((s) => {
+        if (s.finishedAt == null) return true;
+        return now - s.finishedAt < 15000;
+      }));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [staged.filter((s) => s.finishedAt != null).length]);
+
   if (!selectedRace) {
     return (
       <div className="tab-placeholder">
@@ -696,12 +718,12 @@ export default function FinishTab() {
 
   const stageBoat = (boatId: number) => {
     if (stagedBoatIds.has(boatId)) return;
-    setStaged((prev) => [...prev, { boatId, finishTime: null, lastFinishTime: null, id: generateId() }]);
+    setStaged((prev) => [...prev, { boatId, finishTime: null, lastFinishTime: null, id: generateId(), finishedAt: null }]);
     setSearch("");
   };
 
   const markUnknown = () => {
-    setStaged((prev) => [...prev, { boatId: null, finishTime: now, lastFinishTime: null, id: generateId() }]);
+    setStaged((prev) => [...prev, { boatId: null, finishTime: now, lastFinishTime: null, id: generateId(), finishedAt: null }]);
   };
 
   const moveStaged = (index: number, direction: -1 | 1) => {
@@ -730,10 +752,16 @@ export default function FinishTab() {
     const newLapTimes = [...lapTimes, finishTime];
 
     if (newLapsCompleted >= totalLaps) {
-      // Final lap - record as finished
-      setStaged((prev) =>
-        prev.map((s) => (s.id === stagedId ? { ...s, finishTime } : s))
-      );
+      // Final lap - record as finished, move to bottom
+      setStaged((prev) => {
+        const updated = prev.map((s) =>
+          s.id === stagedId ? { ...s, finishTime, finishedAt: Date.now() } : s
+        );
+        // Move finished entry to bottom
+        const finished = updated.find((s) => s.id === stagedId);
+        const rest = updated.filter((s) => s.id !== stagedId);
+        return finished ? [...rest, finished] : updated;
+      });
       saveLapFinish(entry.boatId, finishTime, newLapsCompleted, newLapTimes, true);
     } else {
       // Intermediate lap - save lap data, keep boat in staging unfinished
@@ -760,9 +788,15 @@ export default function FinishTab() {
 
   const resetFinish = (stagedId: string) => {
     const entry = staged.find((s) => s.id === stagedId);
-    setStaged((prev) =>
-      prev.map((s) => (s.id === stagedId ? { ...s, finishTime: null, lastFinishTime: s.finishTime } : s))
-    );
+    setStaged((prev) => {
+      const updated = prev.map((s) =>
+        s.id === stagedId ? { ...s, finishTime: null, lastFinishTime: s.finishTime, finishedAt: null } : s
+      );
+      // Move back to top
+      const reset = updated.find((s) => s.id === stagedId);
+      const rest = updated.filter((s) => s.id !== stagedId);
+      return reset ? [reset, ...rest] : updated;
+    });
     if (entry?.boatId != null) {
       saveFinishTime(entry.boatId, null);
     }
