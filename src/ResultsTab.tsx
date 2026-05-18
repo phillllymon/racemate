@@ -1301,7 +1301,7 @@ export default function ResultsTab() {
 
   // Check for uncertified observations
   useEffect(() => {
-    if (!auth || !selectedRace) { setUncertifiedCount(0); return; }
+    if (!auth || !selectedRace || selectedRace.id < 0) { setUncertifiedCount(0); return; }
     getFinishObservations(auth, selectedRace.id).then((res) => {
       const obs = res.observations || [];
       const certifiedIds = new Set(
