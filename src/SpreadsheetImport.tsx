@@ -14,6 +14,7 @@ const MAPPABLE_FIELDS = [
   { key: "phrf", label: "PHRF Rating", required: false },
   { key: "portsmouthNumber", label: "Portsmouth Number", required: false },
   { key: "ircTcc", label: "IRC TCC", required: false },
+  { key: "orcGph", label: "ORC GPH", required: false },
 ] as const;
 
 type FieldKey = (typeof MAPPABLE_FIELDS)[number]["key"];
@@ -94,6 +95,9 @@ export default function SpreadsheetImport({
           if (lower === "irc" || lower === "irctcc" || lower === "tcc") {
             if (!autoMap.ircTcc) autoMap.ircTcc = col;
           }
+          if (lower === "orc" || lower === "orcgph" || lower === "gph") {
+            if (!autoMap.orcGph) autoMap.orcGph = col;
+          }
         });
         setMapping(autoMap as Record<FieldKey, string>);
         setStep("map");
@@ -130,6 +134,7 @@ export default function SpreadsheetImport({
     phrf: getMappedValue(row, "phrf"),
     portsmouthNumber: getMappedValue(row, "portsmouthNumber"),
     ircTcc: getMappedValue(row, "ircTcc"),
+    orcGph: getMappedValue(row, "orcGph"),
   })).filter((r) => r.name.trim() !== "");
 
   const doImport = async () => {
@@ -150,6 +155,7 @@ export default function SpreadsheetImport({
       if (row.phrf && !isNaN(Number(row.phrf))) info.phrf = Number(row.phrf);
       if (row.portsmouthNumber && !isNaN(Number(row.portsmouthNumber))) info.portsmouthNumber = Number(row.portsmouthNumber);
       if (row.ircTcc && !isNaN(Number(row.ircTcc))) info.ircTcc = Number(row.ircTcc);
+      if (row.orcGph && !isNaN(Number(row.orcGph))) info.orcGph = Number(row.orcGph);
 
       const newBoat = await createBoat(row.name, info);
 

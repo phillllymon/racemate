@@ -131,10 +131,11 @@ function EditBoatForm({
   const [phrf, setPhrf] = useState(boat.info.phrf != null ? String(boat.info.phrf) : "");
   const [pn, setPn] = useState(boat.info.portsmouthNumber != null ? String(boat.info.portsmouthNumber) : "");
   const [ircTcc, setIrcTcc] = useState(boat.info.ircTcc != null ? String(boat.info.ircTcc) : "");
+  const [orcGph, setOrcGph] = useState(boat.info.orcGph != null ? String(boat.info.orcGph) : "");
   const [boatClass, setBoatClass] = useState(raceEntry.class || "");
 
   // Extract custom fields (anything not a known core field)
-  const coreKeys = new Set(["name", "sailNumber", "type", "skipper", "phrf", "portsmouthNumber", "ircTcc", "class"]);
+  const coreKeys = new Set(["name", "sailNumber", "type", "skipper", "phrf", "portsmouthNumber", "ircTcc", "orcGph", "class"]);
   const initialCustom = Object.entries(boat.info)
     .filter(([k]) => !coreKeys.has(k))
     .map(([key, value]) => ({ key, value: String(value ?? "") }));
@@ -169,6 +170,8 @@ function EditBoatForm({
     else delete updatedInfo.portsmouthNumber;
     if (ircTcc.trim() && !isNaN(Number(ircTcc))) updatedInfo.ircTcc = Number(ircTcc);
     else delete updatedInfo.ircTcc;
+    if (orcGph.trim() && !isNaN(Number(orcGph))) updatedInfo.orcGph = Number(orcGph);
+    else delete updatedInfo.orcGph;
     // Remove old custom fields and add current ones
     for (const k of Object.keys(updatedInfo)) {
       if (!coreKeys.has(k)) delete updatedInfo[k];
@@ -208,6 +211,7 @@ function EditBoatForm({
           <input className="login-input" placeholder="PHRF rating" value={phrf} onChange={(e) => setPhrf(e.target.value)} inputMode="numeric" />
           <input className="login-input" placeholder="Portsmouth number" value={pn} onChange={(e) => setPn(e.target.value)} inputMode="numeric" />
           <input className="login-input" placeholder="IRC TCC" value={ircTcc} onChange={(e) => setIrcTcc(e.target.value)} inputMode="decimal" />
+          <input className="login-input" placeholder="ORC GPH" value={orcGph} onChange={(e) => setOrcGph(e.target.value)} inputMode="decimal" />
         </div>
       )}
 
@@ -453,6 +457,7 @@ function AddBoatForm({
   const [phrf, setPhrf] = useState("");
   const [pn, setPn] = useState("");
   const [ircTcc, setIrcTcc] = useState("");
+  const [orcGph, setOrcGph] = useState("");
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [ratingsOpen, setRatingsOpen] = useState(false);
@@ -497,6 +502,7 @@ function AddBoatForm({
     if (phrf.trim() && !isNaN(Number(phrf))) info.phrf = Number(phrf);
     if (pn.trim() && !isNaN(Number(pn))) info.portsmouthNumber = Number(pn);
     if (ircTcc.trim() && !isNaN(Number(ircTcc))) info.ircTcc = Number(ircTcc);
+    if (orcGph.trim() && !isNaN(Number(orcGph))) info.orcGph = Number(orcGph);
     for (const cf of customFields) {
       if (cf.key.trim() && cf.value.trim()) {
         info[cf.key.trim()] = cf.value.trim();
@@ -513,6 +519,7 @@ function AddBoatForm({
     setPhrf("");
     setPn("");
     setIrcTcc("");
+    setOrcGph("");
     setCustomFields([]);
     setBusy(false);
     onDone();
@@ -592,6 +599,7 @@ function AddBoatForm({
           <input className="login-input" placeholder="PHRF rating" value={phrf} onChange={(e) => setPhrf(e.target.value)} inputMode="numeric" />
           <input className="login-input" placeholder="Portsmouth number" value={pn} onChange={(e) => setPn(e.target.value)} inputMode="numeric" />
           <input className="login-input" placeholder="IRC TCC" value={ircTcc} onChange={(e) => setIrcTcc(e.target.value)} inputMode="decimal" />
+          <input className="login-input" placeholder="ORC GPH" value={orcGph} onChange={(e) => setOrcGph(e.target.value)} inputMode="decimal" />
         </div>
       )}
 

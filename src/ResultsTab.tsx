@@ -109,7 +109,7 @@ function ResizableSplit({ left, right }: { left: ReactNode; right: ReactNode }) 
 // ---- Scoring types ----
 
 type TimingMode = "absolute" | "corrected";
-type CorrectionMethod = "phrf-tot" | "phrf-tod" | "portsmouth" | "irc";
+type CorrectionMethod = "phrf-tot" | "phrf-tod" | "portsmouth" | "irc" | "orc-tot";
 type SeriesMethod = "points" | "total-time";
 type WindCondition = "light" | "medium" | "heavy";
 
@@ -257,6 +257,10 @@ function calcIrc(elapsedMs: number, tcc: number): number {
   return elapsedMs * tcc;
 }
 
+function calcOrcToT(elapsedMs: number, gph: number, referenceGph: number): number {
+  return elapsedMs * (referenceGph / gph);
+}
+
 function formatElapsed(ms: number | null): string {
   if (ms == null) return "—";
   const totalSec = Math.floor(ms / 1000);
@@ -297,10 +301,20 @@ function calculateRaceResults(
   // Compute fleet average A/B if needed
   const fleetAB = useFleetAvg ? getFleetAverageAB(raceBoats, boats, 650) : undefined;
 
+  // Compute fleet average GPH for ORC ToT reference
+  const fleetGphValues = raceBoats
+    .map((rb) => boats.find((b) => b.id === rb.boatId)?.info.orcGph)
+    .filter((g) => g != null)
+    .map(Number);
+  const fleetAvgGph = fleetGphValues.length > 0
+    ? fleetGphValues.reduce((sum, g) => sum + g, 0) / fleetGphValues.length
+    : null;
+
   const results: BoatResult[] = raceBoats.map((rb) => {
     const boat = boats.find((b) => b.id === rb.boatId);
     const phrf = boat?.info.phrf != null ? Number(boat.info.phrf) : null;
     const pn = boat?.info.portsmouthNumber != null ? Number(boat.info.portsmouthNumber) : null;
+    const gph = boat?.info.orcGph != null ? Number(boat.info.orcGph) : null;
     const elapsedMs = getElapsedTime(rb, starts);
     const totalLaps = classLaps[rb.class] || 1;
     const lapsCompleted = (rb.lapsCompleted as number) || (rb.finishTime != null ? totalLaps : 0);
@@ -337,12 +351,16 @@ function calculateRaceResults(
       if (tcc != null) {
         correctedMs = calcIrc(adjustedElapsed, tcc);
       }
+    } else if (adjustedElapsed != null && boatTimingMethod === "orc-tot") {
+      if (gph != null && fleetAvgGph != null) {
+        correctedMs = calcOrcToT(adjustedElapsed, gph, fleetAvgGph);
+      }
     } else if (adjustedElapsed != null && boatTimingMethod === "absolute") {
       correctedMs = adjustedElapsed;
     }
 
     // Extract custom fields
-    const coreKeys = new Set(["name", "sailNumber", "type", "skipper", "phrf", "portsmouthNumber", "ircTcc", "class"]);
+    const coreKeys = new Set(["name", "sailNumber", "type", "skipper", "phrf", "portsmouthNumber", "ircTcc", "orcGph", "class"]);
     const cf: Record<string, string> = {};
     if (boat) {
       for (const [k, v] of Object.entries(boat.info)) {
@@ -355,6 +373,7 @@ function calculateRaceResults(
     if (boatTimingMethod === "phrf-tot" || boatTimingMethod === "phrf-tod") rating = phrf;
     else if (boatTimingMethod === "portsmouth") rating = pn;
     else if (boatTimingMethod === "irc") rating = boat?.info.ircTcc != null ? Number(boat.info.ircTcc) : null;
+    else if (boatTimingMethod === "orc-tot") rating = gph;
 
     // Find division for this boat's class
     const div = divisions.find((d) => d.classes.includes(rb.class));
@@ -644,6 +663,8 @@ function getRaceColumns(timingMethod: string, perClassEnabled: boolean = false, 
     cols.splice(cols.findIndex((c) => c.id === "status"), 0, { id: "rating", label: "Portsmouth", defaultOn: false });
   } else if (timingMethod === "irc") {
     cols.splice(cols.findIndex((c) => c.id === "status"), 0, { id: "rating", label: "IRC TCC", defaultOn: false });
+  } else if (timingMethod === "orc-tot") {
+    cols.splice(cols.findIndex((c) => c.id === "status"), 0, { id: "rating", label: "ORC GPH", defaultOn: false });
   }
 
   return cols;
@@ -748,7 +769,7 @@ function RaceResultsView({
             {show("elapsed") && <span className="results-cell results-cell--data">Elapsed</span>}
             {show("corrected") && <span className="results-cell results-cell--data">Corrected</span>}
             {show("rating") && <span className="results-cell results-cell--data">
-              {timingMethod.startsWith("phrf") ? "PHRF" : timingMethod === "portsmouth" ? "PN" : timingMethod === "irc" ? "TCC" : "Rating"}
+              {timingMethod.startsWith("phrf") ? "PHRF" : timingMethod === "portsmouth" ? "PN" : timingMethod === "irc" ? "TCC" : timingMethod === "orc-tot" ? "GPH" : "Rating"}
             </span>}
             {show("status") && <span className="results-cell results-cell--data">Status</span>}
             {customCols.map((col) => (
@@ -943,6 +964,23 @@ function IrcWarning({ raceBoats, boats }: { raceBoats: RaceBoatEntry[]; boats: B
   );
 }
 
+function OrcWarning({ raceBoats, boats }: { raceBoats: RaceBoatEntry[]; boats: Boat[] }) {
+  const missing = raceBoats.filter((rb) => {
+    const boat = boats.find((b) => b.id === rb.boatId);
+    return boat?.info.orcGph == null;
+  });
+  if (missing.length === 0) return null;
+  return (
+    <div className="results-warning">
+      <span className="results-warning-icon">⚠</span>
+      <span>
+        {missing.length} boat{missing.length !== 1 ? "s" : ""} missing ORC GPH rating.
+        Add ratings in the Series tab.
+      </span>
+    </div>
+  );
+}
+
 function PerClassWarnings({
   raceBoats,
   boats,
@@ -976,6 +1014,9 @@ function PerClassWarnings({
     } else if (method === "irc") {
       missingField = "ircTcc";
       missingLabel = "IRC TCC";
+    } else if (method === "orc-tot") {
+      missingField = "orcGph";
+      missingLabel = "ORC GPH";
     }
 
     if (!missingField) return;
@@ -1175,7 +1216,8 @@ function exportRaceCSVWithSummary(
     timingMethod === "phrf-tot" ? "PHRF Time-on-Time" :
     timingMethod === "phrf-tod" ? "PHRF Time-on-Distance" :
     timingMethod === "portsmouth" ? "Portsmouth Yardstick" :
-    timingMethod === "irc" ? "IRC" : timingMethod;
+    timingMethod === "irc" ? "IRC" :
+    timingMethod === "orc-tot" ? "ORC Time-on-Time" : timingMethod;
   lines.push(`Scoring: ${methodLabel}`);
 
   const sorted = [...results.boats].sort((a, b) => (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity));
@@ -1623,6 +1665,12 @@ export default function ResultsTab() {
                     >
                       IRC
                     </button>
+                    <button
+                      className={`results-method-option ${correctionMethod === "orc-tot" ? "results-method-option--active" : ""}`}
+                      onClick={() => setCorrectionMethod("orc-tot")}
+                    >
+                      ORC Time-on-Time
+                    </button>
                   </div>
                 </div>
 
@@ -1823,6 +1871,11 @@ export default function ResultsTab() {
                 {correctionMethod === "irc" && (
                   <IrcWarning raceBoats={raceBoats} boats={boats} />
                 )}
+
+                {/* ORC Time-on-Time settings */}
+                {correctionMethod === "orc-tot" && (
+                  <OrcWarning raceBoats={raceBoats} boats={boats} />
+                )}
               </>
             )}
 
@@ -1839,7 +1892,8 @@ export default function ResultsTab() {
                     method === "phrf-tot" ? "PHRF ToT" :
                     method === "phrf-tod" ? "PHRF ToD" :
                     method === "portsmouth" ? "Portsmouth" :
-                    method === "irc" ? "IRC" : method;
+                    method === "irc" ? "IRC" :
+                    method === "orc-tot" ? "ORC ToT" : method;
 
                   const setConfig = (updates: Partial<ClassTimingConfig>) => {
                     setPerClassConfig((prev) => ({
@@ -1906,6 +1960,12 @@ export default function ResultsTab() {
                                   onClick={() => setConfig({ method: "irc" })}
                                 >
                                   IRC
+                                </button>
+                                <button
+                                  className={`results-method-option ${method === "orc-tot" ? "results-method-option--active" : ""}`}
+                                  onClick={() => setConfig({ method: "orc-tot" })}
+                                >
+                                  ORC Time-on-Time
                                 </button>
                               </div>
 

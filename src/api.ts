@@ -54,6 +54,7 @@ export interface BoatInfo {
   skipper?: string;
   class?: string;
   phrf?: number;
+  orcGph?: number;
   [key: string]: unknown;
 }
 
@@ -74,7 +75,7 @@ export interface AssistantPermissions {
 
 export interface ScoringSettings {
   timingMode?: "absolute" | "corrected";
-  correctionMethod?: "phrf-tot" | "phrf-tod" | "portsmouth" | "irc";
+  correctionMethod?: "phrf-tot" | "phrf-tod" | "portsmouth" | "irc" | "orc-tot";
   perClassEnabled?: boolean;
   perClassConfig?: Record<string, unknown>;
   portsmouthBase?: number;
