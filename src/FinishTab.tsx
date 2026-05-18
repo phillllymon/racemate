@@ -659,7 +659,7 @@ export default function FinishTab() {
     }
   }, [auth?.userId, auth?.token, selectedRace?.id, user?.id]);
 
-  useDataSync(refreshObservations, [selectedRace?.id, auth?.userId], !!auth && !!selectedRace);
+  useDataSync(refreshObservations, [selectedRace?.id, auth?.userId], !!auth && !!selectedRace && (selectedRace?.id ?? 0) > 0);
 
   // Sync: fetch all observations for certification
   const handleSync = useCallback(async () => {
