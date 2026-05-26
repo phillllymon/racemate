@@ -66,6 +66,7 @@ interface RaceContextValue {
   patchSeriesInfo: (seriesId: number, patch: Partial<SeriesInfo>) => void;
   updateBoatInRace: (raceId: number, boatId: number, updater: (boat: RaceBoatEntry) => RaceBoatEntry) => void;
   updateBoatsInRace: (raceId: number, updater: (boats: RaceBoatEntry[]) => RaceBoatEntry[]) => void;
+  addBoatToRace: (raceId: number, entry: RaceBoatEntry) => void;
   softDeleteBoat: (boatId: number) => void;
   removeRace: (raceId: number) => Promise<void>;
   removeSeries: (seriesId: number) => Promise<void>;
@@ -566,6 +567,25 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  // Atomically append a boat entry to a race — safe to call from async .then() handlers
+  const addBoatToRace = useCallback((raceId: number, entry: RaceBoatEntry) => {
+    if (entry.boatId < 0) {
+      trackTempBoatInRace(entry.boatId, raceId);
+    }
+    setRaces((prev) => {
+      const race = prev.find((r) => r.id === raceId);
+      if (!race) return prev;
+      const currentBoats = (race.info.boats || []) as RaceBoatEntry[];
+      if (currentBoats.some((b) => b.boatId === entry.boatId)) return prev;
+      const updatedBoats = [...currentBoats, entry];
+      const merged = { ...race.info, boats: updatedBoats };
+      if (auth && entry.boatId > 0) {
+        queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, merged));
+      }
+      return prev.map((r) => r.id === raceId ? { ...r, info: merged } : r);
+    });
+  }, [auth, trackTempBoatInRace, queueUpdate]);
+
   // Soft delete a boat (marks as deleted, keeps record for historical races)
   const softDeleteBoat = (boatId: number) => {
     setBoats((prev) =>
@@ -650,7 +670,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         createSeries, createRace, createBoat,
         updateBoatData, updateRaceData, updateSeriesData,
         patchRaceInfo, patchSeriesInfo,
-        updateBoatInRace, updateBoatsInRace,
+        updateBoatInRace, updateBoatsInRace, addBoatToRace,
         softDeleteBoat, removeRace, removeSeries,
         refreshAll,
         refreshSelectedRace,

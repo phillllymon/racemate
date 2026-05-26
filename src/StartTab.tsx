@@ -591,6 +591,7 @@ function StartCard({
   otherStartClasses,
   onUpdateStart,
   onBulkStatus,
+  onSaveEdit,
   onRecall,
 }: {
   start: StartInfo;
@@ -600,6 +601,7 @@ function StartCard({
   otherStartClasses: Set<string>;
   onUpdateStart: (updated: StartInfo) => void;
   onBulkStatus: (updates: Array<{ boatId: number; status: string }>) => void;
+  onSaveEdit: (updatedStart: StartInfo, boatUpdates: Array<{ boatId: number; status: string }>) => void;
   onRecall: (startId: string) => void;
 }) {
   const { now } = useTime();
@@ -611,7 +613,7 @@ function StartCard({
     if (start.startTime != null && Date.now() >= start.startTime) {
       const boatsInThisStart = raceBoats.filter((rb) => start.classes.includes(rb.class));
       const allDone = boatsInThisStart.length > 0 && boatsInThisStart.every(
-        (rb) => rb.status === "racing" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ" || rb.status === "finished"
+        (rb) => rb.status === "racing" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ" || rb.status === "finished" || rb.status === "signed-up"
       );
       return allDone;
     }
@@ -668,26 +670,29 @@ function StartCard({
     base.setHours(editHours, editMinutes, editSeconds, 0);
     const newTime = base.getTime();
 
-    // If moving start time to the future and start had already occurred,
-    // reset boats in this start back to checked-in so OCS flow triggers again
-    if (newTime > now && start.startTime != null && start.startTime <= now) {
-      const boatsInThisStart = raceBoats.filter((rb) => editClasses.includes(rb.class));
-      const updates = boatsInThisStart
-        .filter((rb) => rb.status === "racing" || rb.status === "over-early" || rb.status === "OCS")
-        .map((rb) => ({ boatId: rb.boatId, status: "checked-in" }));
-      if (updates.length > 0) onBulkStatus(updates);
-      // Clear dismissed notifications so they fire again
-      setDismissedNotifications(new Set());
-      setOcsComplete(false);
-      hasTransitioned.current = false;
-    }
-
-    onUpdateStart({
+    const updatedStart: StartInfo = {
       ...start,
       name: editName.trim() || undefined,
       classes: editClasses,
       startTime: newTime,
-    });
+    };
+
+    // If moving start time to the future and start had already occurred,
+    // reset boats in this start back to checked-in so OCS flow triggers again.
+    // Use onSaveEdit to apply boat and start updates in a single write.
+    if (newTime > now && start.startTime != null && start.startTime <= now) {
+      const boatsInThisStart = raceBoats.filter((rb) => editClasses.includes(rb.class));
+      const boatUpdates = boatsInThisStart
+        .filter((rb) => rb.status === "racing" || rb.status === "over-early" || rb.status === "OCS")
+        .map((rb) => ({ boatId: rb.boatId, status: "checked-in" }));
+      onSaveEdit(updatedStart, boatUpdates);
+      setDismissedNotifications(new Set());
+      setOcsComplete(false);
+      hasTransitioned.current = false;
+    } else {
+      onUpdateStart(updatedStart);
+    }
+
     setEditingStart(false);
   };
 
@@ -697,7 +702,7 @@ function StartCard({
   const boatsInStart = raceBoats.filter((rb) => start.classes.includes(rb.class));
   const hasOverEarly = boatsInStart.some((rb) => rb.status === "over-early");
   const allAccountedFor = boatsInStart.length > 0 && boatsInStart.every(
-    (rb) => rb.status === "racing" || rb.status === "finished" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ"
+    (rb) => rb.status === "racing" || rb.status === "finished" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ" || rb.status === "signed-up"
   );
   const phase: "countdown" | "starting" | "racing" = hasStarted
     ? ((allAccountedFor && !hasOverEarly && ocsComplete) ? "racing" : "starting")
@@ -965,8 +970,9 @@ export default function StartTab() {
   const starts = raceInfo.starts || [];
   const raceBoats = raceInfo.boats || [];
 
-  // Get all classes in the race
-  const allClasses = Array.from(new Set(raceBoats.map((b) => b.class)));
+  // Get all classes in the race (boat entries + persisted empty classes)
+  const persistedEmpty = (raceInfo.emptyClasses as string[] | undefined) || [];
+  const allClasses = Array.from(new Set([...persistedEmpty, ...raceBoats.map((b) => b.class)]));
   // Classes not yet assigned to a start
   const assignedClasses = new Set(starts.flatMap((s) => s.classes));
 
@@ -1065,6 +1071,25 @@ export default function StartTab() {
             );
             updateRaceData(selectedRace.id, selectedRace.name, {
               ...raceInfo,
+              boats: updatedBoats,
+            });
+          }}
+          onSaveEdit={(updatedStart, boatUpdates) => {
+            const newStarts = starts
+              .map((s) => (s.id === updatedStart.id ? updatedStart : s))
+              .sort((a, b) => {
+                if (a.startTime == null && b.startTime == null) return 0;
+                if (a.startTime == null) return 1;
+                if (b.startTime == null) return -1;
+                return a.startTime - b.startTime;
+              });
+            const updateMap = new Map(boatUpdates.map((u) => [u.boatId, u.status]));
+            const updatedBoats = raceBoats.map((b) =>
+              updateMap.has(b.boatId) ? { ...b, status: updateMap.get(b.boatId)! } : b
+            );
+            updateRaceData(selectedRace.id, selectedRace.name, {
+              ...raceInfo,
+              starts: newStarts,
               boats: updatedBoats,
             });
           }}

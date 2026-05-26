@@ -285,6 +285,7 @@ function StagedBoatRow({
   onAssignBoat,
   allBoats,
   raceBoats,
+  classPlace,
 }: {
   staged: StagedBoat;
   boat: Boat | undefined;
@@ -304,6 +305,7 @@ function StagedBoatRow({
   onAssignBoat: (boatId: number) => void;
   allBoats: Boat[];
   raceBoats: RaceBoatEntry[];
+  classPlace?: number | null;
 }) {
   const [flash, setFlash] = useState(false);
   const [assignSearch, setAssignSearch] = useState("");
@@ -385,15 +387,25 @@ function StagedBoatRow({
 
         {/* Finish button, refinish, or time display */}
         {!isFinished && !hasLastFinish && (
-          <button className="staged-finish-btn" onClick={handleFinish}>
-            {finishLabel}
-          </button>
-        )}
-        {hasLastFinish && (
-          <div className="staged-refinish">
+          <div className="staged-finish-btn-wrap">
             <button className="staged-finish-btn" onClick={handleFinish}>
               {finishLabel}
             </button>
+            {classPlace != null && (
+              <span className="staged-class-place">{classPlace}</span>
+            )}
+          </div>
+        )}
+        {hasLastFinish && (
+          <div className="staged-refinish">
+            <div className="staged-finish-btn-wrap">
+              <button className="staged-finish-btn" onClick={handleFinish}>
+                {finishLabel}
+              </button>
+              {classPlace != null && (
+                <span className="staged-class-place">{classPlace}</span>
+              )}
+            </div>
             <button className="staged-refinish-btn" onClick={onRefinish}>
               {formatFinishTime(staged.lastFinishTime!, finishTimeDisplay, raceBoat?.class, starts)}
             </button>
@@ -705,6 +717,44 @@ export default function FinishTab() {
 
   const raceBoats = selectedRace.info.boats || [];
   const classLaps = (selectedRace.info.classLaps || {}) as Record<string, number>;
+  const classFinishPreviewEnabled = !!selectedRace.info.classFinishPreview;
+
+  const getClassPlace = (index: number): number | null => {
+    if (!classFinishPreviewEnabled) return null;
+    const s = staged[index];
+    if (!s.boatId) return null;
+    const rb = raceBoats.find((b) => b.boatId === s.boatId);
+    if (!rb) return null;
+    const li = getBoatLapInfo(s.boatId);
+    // Only show on final lap
+    if (li.lapsCompleted < li.totalLaps - 1) return null;
+    const myClass = rb.class;
+
+    // Boats still in staging that the user has already clicked Finish on
+    const stagedBoatIds = new Set(staged.filter((s) => s.boatId != null).map((s) => s.boatId as number));
+    const stagedConfirmedCount = staged.filter((s) =>
+      s.boatId != null &&
+      s.finishTime != null &&
+      raceBoats.find((b) => b.boatId === s.boatId)?.class === myClass
+    ).length;
+
+    // Boats that left staging with a recorded finish time (certified or uncertified)
+    const goneWithTimeCount = (raceBoats as RaceBoatEntry[]).filter(
+      (b) => b.class === myClass && !stagedBoatIds.has(b.boatId) &&
+        (b.status === "finished" || myObservations.some((o) => o.boat_id === b.boatId))
+    ).length;
+
+    // Unconfirmed staged boats ahead of this one in the same class on their final lap
+    const stagedAheadCount = staged.slice(0, index).filter((prev) => {
+      if (!prev.boatId || prev.finishTime != null) return false;
+      const prevRb = raceBoats.find((b) => b.boatId === prev.boatId);
+      if (!prevRb || prevRb.class !== myClass) return false;
+      const prevLi = getBoatLapInfo(prev.boatId);
+      return prevLi.lapsCompleted >= prevLi.totalLaps - 1;
+    }).length;
+
+    return stagedConfirmedCount + goneWithTimeCount + stagedAheadCount + 1;
+  };
   const stagedBoatIds = new Set(staged.filter((s) => s.boatId != null).map((s) => s.boatId as number));
 
   const getBoatLapInfo = (boatId: number) => {
@@ -929,6 +979,7 @@ export default function FinishTab() {
                   boat={s.boatId != null ? getBoat(s.boatId) : undefined}
                   raceBoat={s.boatId != null ? getRaceBoat(s.boatId) : undefined}
                   lapInfo={li}
+                  classPlace={getClassPlace(i)}
                   isFirst={i === 0}
                   isLast={i === staged.length - 1}
                   finishTimeDisplay={finishTimeDisplay}

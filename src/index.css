@@ -2602,6 +2602,26 @@ body {
   border-radius: 4px;
 }
 
+.staged-finish-btn-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.staged-class-place {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  font-family: var(--font-display);
+  color: var(--white);
+  background: var(--orange);
+  padding: 0.1rem 0.35rem;
+  border-radius: 99px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
 /* ---- Results settings collapsible ---- */
 
 .results-settings {
@@ -4334,6 +4354,11 @@ body {
   gap: 0.5rem;
 }
 
+.checkin-tab--rapid {
+  height: 100%;
+  overflow: hidden;
+}
+
 .checkin-stats {
   display: flex;
   align-items: center;
@@ -4491,6 +4516,260 @@ body {
 .checkin-action-btn--undo:active {
   color: var(--white);
   background: rgba(255 255 255 / 0.1);
+}
+
+/* ---- Rapid Register ---- */
+
+.rapid-register {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rapid-mode-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.rapid-back-btn {
+  background: none;
+  border: none;
+  color: var(--sky);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.rapid-mode-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--white);
+  flex: 1;
+}
+
+.rapid-mode-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--sky);
+}
+
+.rapid-classes--row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.rapid-classes--grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.rapid-class-btn {
+  flex: 1;
+  padding: 0.75rem 0.4rem;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--white);
+  background: var(--input-bg);
+  border: 2px solid var(--input-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.rapid-class-btn:active {
+  opacity: 0.85;
+}
+
+.rapid-class-btn--active {
+  background: var(--sky);
+  border-color: var(--sky);
+}
+
+.rapid-sail-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.rapid-sail-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.rapid-backspace {
+  flex-shrink: 0;
+  height: 56px;
+  padding: 0 1rem;
+  font-family: var(--font-body);
+  font-size: 1.25rem;
+  color: var(--white);
+  background: var(--input-bg);
+  border: 1.5px solid var(--input-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.rapid-backspace:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.rapid-backspace:active:not(:disabled) {
+  opacity: 0.75;
+}
+
+.rapid-numpad {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.5rem;
+}
+
+.rapid-numpad-btn {
+  height: 52px;
+  font-family: var(--font-body);
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--white);
+  background: var(--navy-mid);
+  border: 1.5px solid var(--input-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.rapid-numpad-btn:active {
+  opacity: 0.75;
+}
+
+.rapid-mode-toggle-btn {
+  height: 32px;
+  padding: 0 0.75rem;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--sky);
+  background: none;
+  border: 1.5px solid var(--sky);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.rapid-mode-toggle-btn:active {
+  opacity: 0.8;
+}
+
+.rapid-boat-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rapid-boat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.rapid-boat-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.75rem;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+  gap: 0.5rem;
+}
+
+.rapid-boat-item:active {
+  background: rgba(255 255 255 / 0.08);
+}
+
+.rapid-boat-item-info {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.rapid-boat-item-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rapid-boat-item-sail {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.rapid-boat-item-class {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--sky);
+  flex-shrink: 0;
+}
+
+/* ---- Edit boat modal ---- */
+
+.edit-boat-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0 0 0 / 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.edit-boat-modal {
+  width: 100%;
+  max-width: 420px;
+  background: var(--navy);
+  border: 1px solid var(--input-border);
+  border-radius: 14px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 12px 48px rgba(0 0 0 / 0.5);
+}
+
+.rapid-delete-btn {
+  color: var(--red);
+  background: none;
+  border: 1.5px solid var(--red);
+}
+
+.rapid-delete-btn:active {
+  background: rgba(255 107 107 / 0.1);
 }
 
 /* ---- Start tab boat list panel ---- */

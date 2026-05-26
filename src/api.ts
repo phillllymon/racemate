@@ -95,6 +95,7 @@ export interface ScoringSettings {
 export interface RaceInfo {
   name: string;
   autoCheckIn?: boolean;
+  classFinishPreview?: boolean;
   boats?: RaceBoatEntry[];
   starts?: StartInfo[];
   scoringMethod?: string;
@@ -144,6 +145,9 @@ async function post<T>(endpoint: string, body: Record<string, unknown>): Promise
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    throw new Error(`API error ${res.status} on ${endpoint}`);
+  }
   const data = await res.json();
   if (data.message === "token mismatch" || data.message === "user not found") {
     window.dispatchEvent(new Event("racemate-auth-invalid"));

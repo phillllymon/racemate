@@ -974,11 +974,12 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
   const [editingRace, setEditingRace] = useState(false);
   const [addingClass, setAddingClass] = useState(false);
   const [newClassName, setNewClassName] = useState("");
-  const [emptyClasses, setEmptyClasses] = useState<string[]>([]);
+  const [emptyClasses, setEmptyClasses] = useState<string[]>((race.info.emptyClasses as string[]) || []);
   const [importing, setImporting] = useState(false);
   const [confirmDeleteRace, setConfirmDeleteRace] = useState(false);
   const [editName, setEditName] = useState(race.name);
   const [editAutoCheckIn, setEditAutoCheckIn] = useState(race.info.autoCheckIn ?? true);
+  const [editClassFinishPreview, setEditClassFinishPreview] = useState(!!race.info.classFinishPreview);
   const [editWind, setEditWind] = useState<string>((race.info.windCondition as string) || "medium");
   const [editCourseLength, setEditCourseLength] = useState(race.info.courseLength != null ? String(race.info.courseLength) : "");
   const [editNotes, setEditNotes] = useState((race.info.notes as string) || "");
@@ -1020,6 +1021,7 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
       ...race.info,
       name: editName.trim() || race.name,
       autoCheckIn: editAutoCheckIn,
+      classFinishPreview: editClassFinishPreview || undefined,
       windCondition: editWind,
       courseLength: editCourseLength.trim() ? Number(editCourseLength) : undefined,
       notes: editNotes.trim() || undefined,
@@ -1034,6 +1036,7 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
   const startEditingRace = () => {
     setEditName(race.name);
     setEditAutoCheckIn(race.info.autoCheckIn ?? true);
+    setEditClassFinishPreview(!!race.info.classFinishPreview);
     setEditWind((race.info.windCondition as string) || "medium");
     setEditCourseLength(race.info.courseLength != null ? String(race.info.courseLength) : "");
     setEditNotes((race.info.notes as string) || "");
@@ -1099,6 +1102,14 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
                   onChange={(e) => setEditAutoCheckIn(e.target.checked)}
                 />
                 <span>Auto check-in boats</span>
+              </label>
+              <label className="races-checkbox">
+                <input
+                  type="checkbox"
+                  checked={editClassFinishPreview}
+                  onChange={(e) => setEditClassFinishPreview(e.target.checked)}
+                />
+                <span>Class finish preview</span>
               </label>
 
               <div className="results-config-section">
@@ -1208,7 +1219,12 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
                       onClick={() => {
                         const name = newClassName.trim();
                         if (name && !classNames.includes(name)) {
-                          setEmptyClasses((prev) => [...prev, name]);
+                          const updated = [...emptyClasses, name];
+                          setEmptyClasses(updated);
+                          updateRaceData(race.id, race.name, {
+                            ...race.info,
+                            emptyClasses: updated,
+                          });
                         }
                         setAddingClass(false);
                         setNewClassName("");
