@@ -625,7 +625,7 @@ function CertifyModal({
 // ---- Main FinishTab ----
 
 export default function FinishTab() {
-  const { selectedRace, updateBoatInRace, updateBoatsInRace, boats } = useRaces();
+  const { selectedRace, updateBoatInRace, boats } = useRaces();
   const { user, token } = useAuth();
   const auth = user && token ? { userId: user.id, token } : null;
   const { now } = useTime();
@@ -1100,15 +1100,9 @@ export default function FinishTab() {
             }
           }}
           onCertifyAll={(certifications) => {
-            // Batch certification using fresh state
-            const certMap = new Map(certifications.map((c) => [c.boatId, c.time]));
-            updateBoatsInRace(selectedRace.id, (currentBoats) =>
-              currentBoats.map((b) => {
-                const certTime = certMap.get(b.boatId);
-                if (certTime == null) return b;
-                return { ...b, finishTime: certTime, status: "finished" };
-              })
-            );
+            certifications.forEach(({ boatId, time }) => {
+              updateBoatInRace(selectedRace.id, boatId, (b) => ({ ...b, finishTime: time, status: "finished" }));
+            });
             // Remove all certified observations after write
             if (auth) {
               const certifiedIds = new Set(certifications.map((c) => c.boatId));

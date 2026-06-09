@@ -33,9 +33,10 @@ module.exports.default = async function handler(req, res) {
                             sql`SELECT * FROM races WHERE id = ${raceId}`.then((races) => {
                                 if (races.length === 1) {
                                     if (races[0]["owner"] === userId) {
+                                        const { boats: _boats, ...infoWithoutBoats } = raceInfo;
                                         sql`
                                             UPDATE races
-                                            SET info = ${JSON.stringify(raceInfo)}, name = ${raceName}
+                                            SET info = ${JSON.stringify(infoWithoutBoats)}, name = ${raceName}
                                             WHERE id = ${raceId}
                                             RETURNING *
                                         `.then((updatedRaceInfo) => {

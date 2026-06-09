@@ -473,12 +473,14 @@ function PostStartPanel({
   onUpdateStatus,
   onAllClear,
   onBulkStatus,
+  onDone,
 }: {
   raceBoats: RaceBoatEntry[];
   startClasses: string[];
   onUpdateStatus: (boatId: number, status: string) => void;
   onAllClear: () => void;
   onBulkStatus: (updates: Array<{ boatId: number; status: string }>) => void;
+  onDone: () => void;
 }) {
   const { boats } = useRaces();
   const [ocsSearch, setOcsSearch] = useState("");
@@ -567,15 +569,20 @@ function PostStartPanel({
         )}
       </div>
 
-      {/* Confirm OCS — when there are over-early boats */}
+      {/* Confirm OCS / Done — when there are over-early boats */}
       {overEarlyBoats.length > 0 && (
-        <button className="btn btn-secondary" onClick={() => {
-          const updates: Array<{ boatId: number; status: string }> = [];
-          overEarlyBoats.forEach((rb) => updates.push({ boatId: rb.boatId, status: "OCS" }));
-          onBulkStatus(updates);
-        }}>
-          Confirm {overEarlyBoats.length} OCS
-        </button>
+        <div className="post-start-actions">
+          <button className="btn btn-secondary" onClick={() => {
+            const updates: Array<{ boatId: number; status: string }> = [];
+            overEarlyBoats.forEach((rb) => updates.push({ boatId: rb.boatId, status: "OCS" }));
+            onBulkStatus(updates);
+          }}>
+            Confirm {overEarlyBoats.length} OCS
+          </button>
+          <button className="btn btn-secondary" onClick={onDone}>
+            Done
+          </button>
+        </div>
       )}
     </div>
   );
@@ -700,12 +707,8 @@ function StartCard({
 
   // Determine start phase
   const boatsInStart = raceBoats.filter((rb) => start.classes.includes(rb.class));
-  const hasOverEarly = boatsInStart.some((rb) => rb.status === "over-early");
-  const allAccountedFor = boatsInStart.length > 0 && boatsInStart.every(
-    (rb) => rb.status === "racing" || rb.status === "finished" || rb.status === "OCS" || rb.status === "DNF" || rb.status === "DNS" || rb.status === "DSQ" || rb.status === "signed-up"
-  );
   const phase: "countdown" | "starting" | "racing" = hasStarted
-    ? ((allAccountedFor && !hasOverEarly && ocsComplete) ? "racing" : "starting")
+    ? (ocsComplete ? "racing" : "starting")
     : "countdown";
 
   // Sequence notifications
@@ -854,6 +857,7 @@ function StartCard({
               onUpdateStatus={(boatId, status) => onBulkStatus([{ boatId, status }])}
               onAllClear={handleAllClear}
               onBulkStatus={onBulkStatus}
+              onDone={() => setOcsComplete(true)}
             />
           )}
 

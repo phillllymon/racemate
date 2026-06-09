@@ -5,6 +5,46 @@ import type { Boat } from "./RaceContext";
 import type { BoatInfo, RaceBoatEntry } from "./api";
 import SearchBar from "./SearchBar";
 
+// ---- Duplicate detection helpers ----
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function normName(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normSail(s: string | undefined): string {
+  return (s || "").trim().toLowerCase().replace(/^0+/, "");
+}
+
+function areSimilarBoats(b1: Boat, b2: Boat): boolean {
+  const n1 = normName(b1.name);
+  const n2 = normName(b2.name);
+  const s1 = normSail(b1.info.sailNumber);
+  const s2 = normSail(b2.info.sailNumber);
+  if (s1 !== s2) return false;
+  const maxLen = Math.max(n1.length, n2.length);
+  if (maxLen === 0) return false;
+  return levenshtein(n1, n2) <= Math.max(2, Math.floor(maxLen * 0.25));
+}
+
+function pairKey(a: number, b: number): string {
+  return `${Math.min(a, b)}-${Math.max(a, b)}`;
+}
+
 // ---- Rapid Register form ----
 
 function RapidRegister({
@@ -171,7 +211,8 @@ export default function CheckInTab() {
   const {
     selectedRace,
     updateBoatInRace,
-    updateBoatsInRace,
+    removeBoatFromRace,
+    patchRaceInfo,
     boats,
     createBoat,
     addBoatToRace,
@@ -184,6 +225,7 @@ export default function CheckInTab() {
   const [rapidMode, setRapidMode] = useState(false);
   const [rapidListOpen, setRapidListOpen] = useState(true);
   const [rapidSearch, setRapidSearch] = useState("");
+  const [dedupMode, setDedupMode] = useState(false);
   const [editingEntry, setEditingEntry] = useState<{ entry: RaceBoatEntry; boat: Boat } | null>(null);
 
   if (!selectedRace) {
@@ -250,8 +292,7 @@ export default function CheckInTab() {
 
   const handleDeleteFromRace = () => {
     if (!editingEntry) return;
-    const boatId = editingEntry.boat.id;
-    updateBoatsInRace(selectedRace.id, (boats) => boats.filter((b) => b.boatId !== boatId));
+    removeBoatFromRace(selectedRace.id, editingEntry.boat.id);
     setEditingEntry(null);
   };
 
@@ -259,6 +300,93 @@ export default function CheckInTab() {
     const boat = getBoat(rb.boatId);
     if (boat) setEditingEntry({ entry: rb, boat });
   };
+
+  // ---- Duplicate detection ----
+
+  const confirmedSeparate = (selectedRace.info.confirmedSeparate as [number, number][] | undefined) || [];
+  const confirmedSet = new Set(confirmedSeparate.map(([a, b]) => pairKey(a, b)));
+
+  const dupePairs: [RaceBoatEntry, RaceBoatEntry][] = [];
+  for (let i = 0; i < raceBoats.length; i++) {
+    for (let j = i + 1; j < raceBoats.length; j++) {
+      const rb1 = raceBoats[i], rb2 = raceBoats[j];
+      const boat1 = getBoat(rb1.boatId), boat2 = getBoat(rb2.boatId);
+      if (!boat1 || !boat2) continue;
+      if (confirmedSet.has(pairKey(rb1.boatId, rb2.boatId))) continue;
+      if (areSimilarBoats(boat1, boat2)) dupePairs.push([rb1, rb2]);
+    }
+  }
+
+  const handleKeep = (_keepId: number, removeId: number) => {
+    removeBoatFromRace(selectedRace.id, removeId);
+  };
+
+  const handleMarkSeparate = (id1: number, id2: number) => {
+    const pair: [number, number] = [Math.min(id1, id2), Math.max(id1, id2)];
+    patchRaceInfo(selectedRace.id, { confirmedSeparate: [...confirmedSeparate, pair] });
+  };
+
+  // ---- Dedup mode ----
+
+  if (dedupMode) {
+    return (
+      <div className="checkin-tab">
+        {editingEntry && (
+          <EditBoatModal
+            boat={editingEntry.boat}
+            entry={editingEntry.entry}
+            classes={allClasses}
+            onSave={handleEditSave}
+            onDelete={handleDeleteFromRace}
+            onClose={() => setEditingEntry(null)}
+          />
+        )}
+        <div className="rapid-mode-header">
+          <button className="rapid-back-btn" onClick={() => setDedupMode(false)}>← Back</button>
+          <span className="rapid-mode-title">De-dupe Boats</span>
+          <span className="rapid-mode-count">{dupePairs.length} pair{dupePairs.length !== 1 ? "s" : ""}</span>
+        </div>
+        {dupePairs.length === 0 && (
+          <p className="races-empty" style={{ marginTop: "1rem" }}>All duplicates resolved</p>
+        )}
+        <div className="dedup-list">
+          {dupePairs.map(([rb1, rb2]) => {
+            const boat1 = getBoat(rb1.boatId);
+            const boat2 = getBoat(rb2.boatId);
+            return (
+              <div key={pairKey(rb1.boatId, rb2.boatId)} className="dedup-pair">
+                <div className="dedup-pair-boats">
+                  {([[ rb1, boat1], [rb2, boat2]] as [RaceBoatEntry, Boat | undefined][]).map(([rb, boat], idx) => (
+                    <div key={idx} className="dedup-boat-col">
+                      <div className="dedup-boat-info">
+                        <span className="dedup-boat-name">{boat?.name || `Boat #${rb.boatId}`}</span>
+                        {boat?.info.sailNumber && (
+                          <span className="dedup-boat-sail">#{boat.info.sailNumber}</span>
+                        )}
+                        <span className="dedup-boat-class">{rb.class}</span>
+                      </div>
+                      <button
+                        className="btn btn-primary dedup-keep-btn"
+                        onClick={() => handleKeep(rb.boatId, idx === 0 ? rb2.boatId : rb1.boatId)}
+                      >
+                        Keep
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="btn btn-secondary dedup-separate-btn"
+                  onClick={() => handleMarkSeparate(rb1.boatId, rb2.boatId)}
+                >
+                  Different boats
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   // ---- Rapid mode ----
 
@@ -385,6 +513,11 @@ export default function CheckInTab() {
             />
             <span>Hide checked in</span>
           </label>
+          {dupePairs.length > 0 && (
+            <button className="rapid-mode-toggle-btn dedup-toggle-btn" onClick={() => setDedupMode(true)}>
+              De-dupe ({dupePairs.length})
+            </button>
+          )}
           <button className="rapid-mode-toggle-btn" onClick={() => setRapidMode(true)}>
             Rapid Register
           </button>

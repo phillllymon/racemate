@@ -6,6 +6,7 @@ import {
   addSeries, updateSeries, getSeriesByColumn, deleteSeries,
   addBoat, updateBoat, getBoatsByColumn,
   getAssistantRaces,
+  addRaceBoat, updateRaceBoat, deleteRaceBoat, getRaceBoats, rowToEntry,
 } from "./api";
 import type {
   RaceRecord, SeriesRecord, BoatRecord,
@@ -65,7 +66,7 @@ interface RaceContextValue {
   patchRaceInfo: (raceId: number, patch: Partial<RaceInfo>) => void;
   patchSeriesInfo: (seriesId: number, patch: Partial<SeriesInfo>) => void;
   updateBoatInRace: (raceId: number, boatId: number, updater: (boat: RaceBoatEntry) => RaceBoatEntry) => void;
-  updateBoatsInRace: (raceId: number, updater: (boats: RaceBoatEntry[]) => RaceBoatEntry[]) => void;
+  removeBoatFromRace: (raceId: number, boatId: number) => void;
   addBoatToRace: (raceId: number, entry: RaceBoatEntry) => void;
   softDeleteBoat: (boatId: number) => void;
   removeRace: (raceId: number) => Promise<void>;
@@ -212,6 +213,17 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     refreshAll();
   }, [user?.id]);
 
+  // Fetch race boats when a race is selected
+  useEffect(() => {
+    if (!auth || selectedRaceId == null) return;
+    getRaceBoats(auth, selectedRaceId).then((res) => {
+      const freshBoats = res.rows.map(rowToEntry);
+      setRaces((prev) => prev.map((r) =>
+        r.id === selectedRaceId ? { ...r, info: { ...r.info, boats: freshBoats } } : r
+      ));
+    }).catch(() => {});
+  }, [selectedRaceId, auth?.userId]);
+
   // Periodically refresh the selected race data to pick up changes from other users
   useEffect(() => {
     if (!auth || selectedRaceId == null) return;
@@ -227,16 +239,25 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     if (interval <= 0) return;
 
     const timer = setInterval(async () => {
-      // Don't overwrite local data if we have pending or in-flight writes for this race
-      if (hasPendingWrite(`race-${selectedRaceId}`)) return;
       try {
-        const res = await getRacesByColumn(auth, "id", selectedRaceId);
-        if (res.results.length === 1) {
-          // Double-check no writes appeared during the fetch
-          if (hasPendingWrite(`race-${selectedRaceId}`)) return;
-          const fresh = parseRecord<RaceInfo>(res.results[0]);
-          setRaces((prev) => prev.map((r) => r.id === selectedRaceId ? fresh : r));
-        }
+        const [raceRes, boatsRes] = await Promise.all([
+          hasPendingWrite(`race-${selectedRaceId}`) ? null : getRacesByColumn(auth, "id", selectedRaceId),
+          getRaceBoats(auth, selectedRaceId),
+        ]);
+        const freshBoats = boatsRes.rows.map(rowToEntry);
+        setRaces((prev) => prev.map((r) => {
+          if (r.id !== selectedRaceId) return r;
+          // Merge: server boats take precedence; keep local-only boats not yet confirmed
+          const serverBoatIds = new Set(freshBoats.map((b) => b.boatId));
+          const localBoats = (r.info.boats || []) as RaceBoatEntry[];
+          const pendingLocal = localBoats.filter((b) => !serverBoatIds.has(b.boatId));
+          const mergedBoats = [...freshBoats, ...pendingLocal];
+          if (raceRes && raceRes.results.length === 1 && !hasPendingWrite(`race-${selectedRaceId}`)) {
+            const freshRace = parseRecord<RaceInfo>(raceRes.results[0]);
+            return { ...freshRace, info: { ...freshRace.info, boats: mergedBoats } };
+          }
+          return { ...r, info: { ...r.info, boats: mergedBoats } };
+        }));
       } catch {
         // ignore
       }
@@ -259,9 +280,14 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   const refreshSelectedRace = useCallback(async () => {
     if (!auth || !selectedRaceId) return;
     try {
-      const res = await getRacesByColumn(auth, "id", selectedRaceId);
-      if (res.results.length === 1) {
-        const fresh = parseRecord<RaceInfo>(res.results[0]);
+      const [raceRes, boatsRes] = await Promise.all([
+        getRacesByColumn(auth, "id", selectedRaceId),
+        getRaceBoats(auth, selectedRaceId),
+      ]);
+      if (raceRes.results.length === 1) {
+        const fresh = parseRecord<RaceInfo>(raceRes.results[0]);
+        const freshBoats = boatsRes.rows.map(rowToEntry);
+        fresh.info.boats = freshBoats;
         setRaces((prev) => prev.map((r) => r.id === fresh.id ? fresh : r));
       }
     } catch {
@@ -373,7 +399,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       prev.map((b) => (b.id === tempId ? { ...b, id: realId } : b))
     );
 
-    // 2. Swap in tracked races only
+    // 2. Swap in tracked races and call addRaceBoat for each
     const pending = pendingBoatsRef.current.get(tempId);
     if (pending) {
       setRaces((prevRaces) =>
@@ -382,17 +408,16 @@ export function RaceProvider({ children }: { children: ReactNode }) {
           const updatedBoats = (race.info.boats || []).map((rb) =>
             rb.boatId === tempId ? { ...rb, boatId: realId } : rb
           );
-          const updatedRace = { ...race, info: { ...race.info, boats: updatedBoats } };
-          // Queue the race update to sync the swapped ID to backend
-          if (auth) {
-            queueUpdate(`race-${race.id}`, () => updateRace(auth, race.id, race.name, updatedRace.info));
+          const swappedEntry = updatedBoats.find((rb) => rb.boatId === realId);
+          if (auth && swappedEntry) {
+            addRaceBoat(auth, race.id, swappedEntry).catch(() => {});
           }
-          return updatedRace;
+          return { ...race, info: { ...race.info, boats: updatedBoats } };
         })
       );
       pendingBoatsRef.current.delete(tempId);
     }
-  }, [auth, queueUpdate]);
+  }, [auth]);
 
   const retryPendingBoats = useCallback(async () => {
     if (!auth || pendingBoatsRef.current.size === 0) return;
@@ -475,21 +500,12 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   };
 
   const updateRaceData = (raceId: number, name: string, info: RaceInfo) => {
-    // Track any temp boat IDs being added to this race
-    const raceBoats = info.boats || [];
-    for (const rb of raceBoats) {
-      if (rb.boatId < 0 && pendingBoatsRef.current.has(rb.boatId)) {
-        trackTempBoatInRace(rb.boatId, raceId);
-      }
-    }
-
     setRaces((prev) =>
       prev.map((r) => (r.id === raceId ? { ...r, name, info } : r))
     );
-    // Only sync races that have no temp boat IDs
-    const hasTempBoats = raceBoats.some((rb) => rb.boatId < 0);
-    if (auth && !hasTempBoats) {
-      queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, name, info));
+    if (auth) {
+      const { boats: _boats, ...infoWithoutBoats } = info;
+      queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, name, infoWithoutBoats as RaceInfo));
     }
   };
 
@@ -509,11 +525,8 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       if (!race) return prev;
       const merged = { ...race.info, ...patch };
       if (auth) {
-        const raceBoats = (merged.boats || []) as RaceBoatEntry[];
-        const hasTempBoats = raceBoats.some((rb: RaceBoatEntry) => rb.boatId < 0);
-        if (!hasTempBoats) {
-          queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, merged));
-        }
+        const { boats: _boats, ...mergedWithoutBoats } = merged;
+        queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, mergedWithoutBoats as RaceInfo));
       }
       return prev.map((r) => r.id === raceId ? { ...r, info: merged } : r);
     });
@@ -538,34 +551,26 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       if (!race) return prev;
       const currentBoats = (race.info.boats || []) as RaceBoatEntry[];
       const updatedBoats = currentBoats.map((b) => b.boatId === boatId ? updater(b) : b);
-      const merged = { ...race.info, boats: updatedBoats };
-      if (auth) {
-        const hasTempBoats = updatedBoats.some((rb) => rb.boatId < 0);
-        if (!hasTempBoats) {
-          queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, merged));
-        }
+      const updatedEntry = updatedBoats.find((b) => b.boatId === boatId);
+      if (auth && boatId > 0 && updatedEntry) {
+        queueUpdate(`race-boat-${raceId}-${boatId}`, () => updateRaceBoat(auth, raceId, updatedEntry));
       }
-      return prev.map((r) => r.id === raceId ? { ...r, info: merged } : r);
+      return prev.map((r) => r.id === raceId ? { ...r, info: { ...race.info, boats: updatedBoats } } : r);
     });
   };
 
-  // Update all boats within a race, reading freshest state
-  const updateBoatsInRace = (raceId: number, updater: (boats: RaceBoatEntry[]) => RaceBoatEntry[]) => {
+  // Remove a single boat from a race
+  const removeBoatFromRace = useCallback((raceId: number, boatId: number) => {
     setRaces((prev) => {
       const race = prev.find((r) => r.id === raceId);
       if (!race) return prev;
-      const currentBoats = (race.info.boats || []) as RaceBoatEntry[];
-      const updatedBoats = updater(currentBoats);
-      const merged = { ...race.info, boats: updatedBoats };
-      if (auth) {
-        const hasTempBoats = updatedBoats.some((rb) => rb.boatId < 0);
-        if (!hasTempBoats) {
-          queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, merged));
-        }
+      const updatedBoats = ((race.info.boats || []) as RaceBoatEntry[]).filter((b) => b.boatId !== boatId);
+      if (auth && boatId > 0) {
+        deleteRaceBoat(auth, raceId, boatId).catch(() => {});
       }
-      return prev.map((r) => r.id === raceId ? { ...r, info: merged } : r);
+      return prev.map((r) => r.id === raceId ? { ...r, info: { ...race.info, boats: updatedBoats } } : r);
     });
-  };
+  }, [auth]);
 
   // Atomically append a boat entry to a race — safe to call from async .then() handlers
   const addBoatToRace = useCallback((raceId: number, entry: RaceBoatEntry) => {
@@ -577,14 +582,13 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       if (!race) return prev;
       const currentBoats = (race.info.boats || []) as RaceBoatEntry[];
       if (currentBoats.some((b) => b.boatId === entry.boatId)) return prev;
-      const updatedBoats = [...currentBoats, entry];
-      const merged = { ...race.info, boats: updatedBoats };
+      // Fire-and-forget for real IDs — server handles concurrent inserts via ON CONFLICT DO NOTHING
       if (auth && entry.boatId > 0) {
-        queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, merged));
+        addRaceBoat(auth, raceId, entry).catch(() => {});
       }
-      return prev.map((r) => r.id === raceId ? { ...r, info: merged } : r);
+      return prev.map((r) => r.id === raceId ? { ...r, info: { ...race.info, boats: [...currentBoats, entry] } } : r);
     });
-  }, [auth, trackTempBoatInRace, queueUpdate]);
+  }, [auth, trackTempBoatInRace]);
 
   // Soft delete a boat (marks as deleted, keeps record for historical races)
   const softDeleteBoat = (boatId: number) => {
@@ -670,7 +674,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         createSeries, createRace, createBoat,
         updateBoatData, updateRaceData, updateSeriesData,
         patchRaceInfo, patchSeriesInfo,
-        updateBoatInRace, updateBoatsInRace, addBoatToRace,
+        updateBoatInRace, removeBoatFromRace, addBoatToRace,
         softDeleteBoat, removeRace, removeSeries,
         refreshAll,
         refreshSelectedRace,

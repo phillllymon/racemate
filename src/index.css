@@ -1607,6 +1607,15 @@ body {
   flex-direction: column;
 }
 
+.post-start-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.post-start-actions .btn {
+  flex: 1;
+}
+
 /* ---- Chart tab ---- */
 
 .chart-tab-full {
@@ -4760,6 +4769,75 @@ body {
   flex-direction: column;
   gap: 0.75rem;
   box-shadow: 0 12px 48px rgba(0 0 0 / 0.5);
+}
+
+/* ---- De-dupe mode ---- */
+
+.dedup-toggle-btn {
+  color: var(--orange, #fb923c);
+  border-color: var(--orange, #fb923c);
+}
+
+.dedup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.dedup-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 12px;
+}
+
+.dedup-pair-boats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.dedup-boat-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dedup-boat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+}
+
+.dedup-boat-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--white);
+  word-break: break-word;
+}
+
+.dedup-boat-sail {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.dedup-boat-class {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--sky);
+}
+
+.dedup-keep-btn {
+  width: 100%;
+}
+
+.dedup-separate-btn {
+  width: 100%;
 }
 
 .rapid-delete-btn {

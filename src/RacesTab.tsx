@@ -446,7 +446,7 @@ function AddBoatForm({
   className: string;
   onDone: () => void;
 }) {
-  const { races, boats, createBoat, updateRaceData } = useRaces();
+  const { races, boats, createBoat, addBoatToRace: contextAddBoatToRace } = useRaces();
   const race = races.find((r) => r.id === raceId)!;
 
   const [mode, setMode] = useState<"choose" | "new" | "existing">("choose");
@@ -480,16 +480,11 @@ function AddBoatForm({
   });
 
   const addBoatToRace = (boatId: number) => {
-    const entry: RaceBoatEntry = {
+    contextAddBoatToRace(raceId, {
       boatId,
       class: className,
       status: race.info.autoCheckIn ? "checked-in" : "signed-up",
-    };
-    const updatedInfo = {
-      ...race.info,
-      boats: [...(race.info.boats || []), entry],
-    };
-    updateRaceData(raceId, race.name, updatedInfo);
+    });
   };
 
   const submitNew = async () => {

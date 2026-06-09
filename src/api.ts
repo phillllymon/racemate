@@ -46,6 +46,43 @@ export interface SeriesRecord {
   owner: string;
 }
 
+export interface RaceBoatRow {
+  id: number;
+  race_id: number;
+  boat_id: number;
+  class: string;
+  status: string;
+  finish_time: string | null; // bigint comes back as string from Neon
+  laps_completed: number;
+  lap_times: number[];
+  info: Record<string, unknown>;
+  created_at: string;
+}
+
+export function rowToEntry(row: RaceBoatRow): RaceBoatEntry {
+  return {
+    boatId: row.boat_id,
+    class: row.class,
+    status: row.status,
+    finishTime: row.finish_time != null ? Number(row.finish_time) : null,
+    lapsCompleted: row.laps_completed,
+    lapTimes: row.lap_times || [],
+    ...row.info,
+  };
+}
+
+function entryToFields(entry: RaceBoatEntry) {
+  const { boatId: _b, class: _c, status: _s, finishTime: _ft, lapsCompleted: _lc, lapTimes: _lt, ...rest } = entry;
+  return {
+    class: entry.class,
+    status: entry.status,
+    finishTime: (entry.finishTime as number | null | undefined) ?? null,
+    lapsCompleted: (entry.lapsCompleted as number) || 0,
+    lapTimes: (entry.lapTimes as number[]) || [],
+    info: rest as Record<string, unknown>,
+  };
+}
+
 // Parsed info types used in the frontend
 export interface BoatInfo {
   name: string;
@@ -102,6 +139,7 @@ export interface RaceInfo {
   pro?: string;
   assistants?: string[];
   customAssistants?: boolean;
+  confirmedSeparate?: [number, number][];
   assistantPermissions?: AssistantPermissions;
   customPermissions?: boolean;
   scoringSettings?: ScoringSettings;
@@ -273,6 +311,62 @@ export async function getRacesByColumn(
     token: auth.token,
     column,
     targetVal,
+  });
+}
+
+// ---- Race boats ----
+
+export async function addRaceBoat(
+  auth: AuthParams,
+  raceId: number,
+  entry: RaceBoatEntry
+): Promise<{ message: string; row: RaceBoatRow | null }> {
+  const fields = entryToFields(entry);
+  return post("addRaceBoat", {
+    userId: auth.userId,
+    token: auth.token,
+    raceId,
+    boatId: entry.boatId,
+    ...fields,
+  });
+}
+
+export async function updateRaceBoat(
+  auth: AuthParams,
+  raceId: number,
+  entry: RaceBoatEntry
+): Promise<{ message: string; row: RaceBoatRow | null }> {
+  const fields = entryToFields(entry);
+  return post("updateRaceBoat", {
+    userId: auth.userId,
+    token: auth.token,
+    raceId,
+    boatId: entry.boatId,
+    ...fields,
+  });
+}
+
+export async function deleteRaceBoat(
+  auth: AuthParams,
+  raceId: number,
+  boatId: number
+): Promise<{ message: string }> {
+  return post("deleteRaceBoat", {
+    userId: auth.userId,
+    token: auth.token,
+    raceId,
+    boatId,
+  });
+}
+
+export async function getRaceBoats(
+  auth: AuthParams,
+  raceId: number
+): Promise<{ message: string; rows: RaceBoatRow[] }> {
+  return post("getRaceBoats", {
+    userId: auth.userId,
+    token: auth.token,
+    raceId,
   });
 }
 
