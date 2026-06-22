@@ -33,8 +33,8 @@ module.exports.default = async function handler(req, res) {
             const lapTimesStr = JSON.stringify(lapTimes || []);
             const infoStr = JSON.stringify(info || {});
             const result = await sql`
-                INSERT INTO race_boats (race_id, boat_id, class, status, finish_time, laps_completed, lap_times, info)
-                VALUES (${raceId}, ${boatId}, ${boatClass || ''}, ${status || 'registered'}, ${finishTime ?? null}, ${lapsCompleted || 0}, ${lapTimesStr}, ${infoStr})
+                INSERT INTO race_boats (race_id, boat_id, class, status, finish_time, laps_completed, lap_times, info, created_at)
+                VALUES (${raceId}, ${boatId}, ${boatClass || ''}, ${status || 'registered'}, ${finishTime ?? null}, ${lapsCompleted || 0}, ${lapTimesStr}, ${infoStr}, NOW())
                 ON CONFLICT (race_id, boat_id) DO NOTHING
                 RETURNING *
             `;

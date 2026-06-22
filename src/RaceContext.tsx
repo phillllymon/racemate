@@ -213,14 +213,18 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     refreshAll();
   }, [user?.id]);
 
-  // Fetch race boats when a race is selected
+  // Fetch race boats when a race is selected, merging with any locally-pending boats
   useEffect(() => {
     if (!auth || selectedRaceId == null) return;
     getRaceBoats(auth, selectedRaceId).then((res) => {
       const freshBoats = res.rows.map(rowToEntry);
-      setRaces((prev) => prev.map((r) =>
-        r.id === selectedRaceId ? { ...r, info: { ...r.info, boats: freshBoats } } : r
-      ));
+      setRaces((prev) => prev.map((r) => {
+        if (r.id !== selectedRaceId) return r;
+        const serverBoatIds = new Set(freshBoats.map((b) => b.boatId));
+        const localBoats = (r.info.boats || []) as RaceBoatEntry[];
+        const pendingLocal = localBoats.filter((b) => !serverBoatIds.has(b.boatId));
+        return { ...r, info: { ...r.info, boats: [...freshBoats, ...pendingLocal] } };
+      }));
     }).catch(() => {});
   }, [selectedRaceId, auth?.userId]);
 
