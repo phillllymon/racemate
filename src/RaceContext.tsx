@@ -258,7 +258,11 @@ export function RaceProvider({ children }: { children: ReactNode }) {
           const mergedBoats = [...freshBoats, ...pendingLocal];
           if (raceRes && raceRes.results.length === 1 && !hasPendingWrite(`race-${selectedRaceId}`)) {
             const freshRace = parseRecord<RaceInfo>(raceRes.results[0]);
-            return { ...freshRace, info: { ...freshRace.info, boats: mergedBoats } };
+            // Preserve locally-added empty classes that haven't been synced yet
+            const localEmptyClasses = (r.info.emptyClasses as string[] | undefined) || [];
+            const serverEmptyClasses = (freshRace.info.emptyClasses as string[] | undefined) || [];
+            const mergedEmptyClasses = Array.from(new Set([...serverEmptyClasses, ...localEmptyClasses]));
+            return { ...freshRace, info: { ...freshRace.info, boats: mergedBoats, emptyClasses: mergedEmptyClasses } };
           }
           return { ...r, info: { ...r.info, boats: mergedBoats } };
         }));

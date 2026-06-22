@@ -57,16 +57,7 @@ test.describe.serial("race flow", () => {
     // ---- Create race inside the series ----
     await page.getByRole("button", { name: "+ Add Race" }).click();
     await page.getByPlaceholder("Race name").fill(RACE_NAME);
-
-    // Wait for the server to confirm the race so we get the real ID before adding a class.
-    // If we add a class while the temp ID is still active the pending-write queue gets keyed
-    // to the temp ID and the 15-second poll will overwrite emptyClasses with the server copy.
-    const addRaceResponse = page.waitForResponse(
-      (r) => r.url().includes("/api/addRace") && r.request().method() === "POST",
-      { timeout: 15_000 }
-    );
     await page.getByRole("button", { name: "Create Race" }).click();
-    await addRaceResponse;
 
     // Wait for the race card to appear inside the series (scope avoids topbar/results ambiguity)
     const raceCardName = seriesCard.locator(".race-card-name").filter({ hasText: RACE_NAME });
