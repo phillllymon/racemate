@@ -227,6 +227,7 @@ export default function CheckInTab() {
   const [rapidSearch, setRapidSearch] = useState("");
   const [dedupMode, setDedupMode] = useState(false);
   const [editingEntry, setEditingEntry] = useState<{ entry: RaceBoatEntry; boat: Boat } | null>(null);
+  const latestRaceId = useRef<number | null>(null);
 
   if (!selectedRace) {
     return (
@@ -235,6 +236,8 @@ export default function CheckInTab() {
       </div>
     );
   }
+
+  latestRaceId.current = selectedRace.id;
 
   const raceBoats: RaceBoatEntry[] = (selectedRace.info.boats || []) as RaceBoatEntry[];
   const getBoat = (id: number): Boat | undefined => boats.find((b) => b.id === id);
@@ -256,7 +259,6 @@ export default function CheckInTab() {
   };
 
   const handleRapidSubmit = (name: string, sailNumber: string, className: string) => {
-    const raceId = selectedRace.id;
     const boatName = name.trim() || sailNumber.trim();
     const info: BoatInfo = { name: boatName };
     if (sailNumber.trim()) info.sailNumber = sailNumber.trim();
@@ -269,6 +271,10 @@ export default function CheckInTab() {
     const status = classHasStarted ? "racing" : "checked-in";
 
     createBoat(boatName, info).then((newBoat) => {
+      // Use the ref so we always get the real race ID even if createRace resolved
+      // and swapped from a temp ID after Submit was clicked but before createBoat resolved.
+      const raceId = latestRaceId.current;
+      if (raceId == null) return;
       addBoatToRace(raceId, { boatId: newBoat.id, class: className, status });
     });
   };

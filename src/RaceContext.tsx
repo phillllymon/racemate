@@ -351,9 +351,27 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       const res = await addRace(auth, name, raceInfo);
       const created = parseRecord<RaceInfo>(res.race[0]);
 
-      // Swap temp ID in races
-      setRaces((prev) => prev.map((r) => r.id === tempId ? created : r));
+      // Boats may have been checked in locally while the race still had its temp ID —
+      // those addRaceBoat calls were skipped (see addBoatToRace). Preserve them instead
+      // of dropping them when swapping in `created`, and re-send them now that we have
+      // a real race ID.
+      setRaces((prev) => prev.map((r) => {
+        if (r.id !== tempId) return r;
+        const localBoats = (r.info.boats || []) as RaceBoatEntry[];
+        localBoats.forEach((b) => {
+          if (auth && b.boatId > 0) addRaceBoat(auth, created.id, b).catch((e) => console.error("addRaceBoat failed (post-create resync)", e));
+        });
+        return { ...created, info: { ...created.info, boats: localBoats } };
+      }));
       setSelectedRaceId(created.id);
+
+      // Boats still waiting on their own real ID (see pendingBoatsRef) were tracked
+      // against this race's temp ID — repoint them so swapBoatId can still link them
+      // to the race once they resolve.
+      pendingBoatsRef.current.forEach((entry) => {
+        const idx = entry.raceIds.indexOf(tempId);
+        if (idx !== -1) entry.raceIds[idx] = created.id;
+      });
 
       // Swap temp ID in parent series
       if (seriesId !== null) {
@@ -418,7 +436,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
           );
           const swappedEntry = updatedBoats.find((rb) => rb.boatId === realId);
           if (auth && swappedEntry) {
-            addRaceBoat(auth, race.id, swappedEntry).catch(() => {});
+            addRaceBoat(auth, race.id, swappedEntry).catch((e) => console.error("addRaceBoat failed (boat ID swap)", e));
           }
           return { ...race, info: { ...race.info, boats: updatedBoats } };
         })
@@ -590,9 +608,12 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       if (!race) return prev;
       const currentBoats = (race.info.boats || []) as RaceBoatEntry[];
       if (currentBoats.some((b) => b.boatId === entry.boatId)) return prev;
-      // Fire-and-forget for real IDs — server handles concurrent inserts via ON CONFLICT DO NOTHING
-      if (auth && entry.boatId > 0) {
-        addRaceBoat(auth, raceId, entry).catch(() => {});
+      // Fire-and-forget for real IDs — server handles concurrent inserts via ON CONFLICT DO NOTHING.
+      // Races also carry a temp negative ID until the server confirms creation; race_id is a
+      // Postgres integer column, so a temp ID here would silently fail on insert. Skip until
+      // the race swap (in createRace) re-sends this boat with the real ID.
+      if (auth && entry.boatId > 0 && raceId > 0) {
+        addRaceBoat(auth, raceId, entry).catch((e) => console.error("addRaceBoat failed", e));
       }
       return prev.map((r) => r.id === raceId ? { ...r, info: { ...race.info, boats: [...currentBoats, entry] } } : r);
     });

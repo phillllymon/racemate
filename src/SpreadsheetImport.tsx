@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useRaces } from "./RaceContext";
 import type { Race } from "./RaceContext";
-import type { BoatInfo, RaceBoatEntry } from "./api";
+import type { BoatInfo } from "./api";
 import * as XLSX from "xlsx";
 
 // Fields the user can map columns to
@@ -32,7 +32,7 @@ export default function SpreadsheetImport({
   race: Race;
   onDone: () => void;
 }) {
-  const { createBoat, updateRaceData, races } = useRaces();
+  const { createBoat, addBoatToRace, races } = useRaces();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<Step>("upload");
@@ -141,9 +141,7 @@ export default function SpreadsheetImport({
     setBusy(true);
 
     const currentRace = races.find((r) => r.id === race.id) || race;
-    const existingEntries = currentRace.info.boats || [];
-    const newEntries: RaceBoatEntry[] = [...existingEntries];
-    const alreadyInRace = new Set(existingEntries.map((b) => b.boatId));
+    const alreadyInRace = new Set((currentRace.info.boats || []).map((b) => b.boatId));
     let added = 0;
 
     // Create every boat from the spreadsheet — no duplicate matching
@@ -160,7 +158,9 @@ export default function SpreadsheetImport({
       const newBoat = await createBoat(row.name, info);
 
       if (!alreadyInRace.has(newBoat.id)) {
-        newEntries.push({
+        // addBoatToRace both updates local state and syncs to the race_boats table
+        // (updateRaceData strips `boats` from its payload, so it can never do this).
+        addBoatToRace(race.id, {
           boatId: newBoat.id,
           class: row.class,
           status: currentRace.info.autoCheckIn ? "checked-in" : "signed-up",
@@ -169,24 +169,6 @@ export default function SpreadsheetImport({
         added++;
       }
     }
-
-    // Re-read fresh race state in case createBoat modified it via temp IDs
-    const freshRace = races.find((r) => r.id === race.id) || currentRace;
-    const freshEntries = freshRace.info.boats || [];
-    const freshIds = new Set(freshEntries.map((b) => b.boatId));
-
-    const mergedEntries = [...freshEntries];
-    for (const entry of newEntries) {
-      if (!freshIds.has(entry.boatId)) {
-        mergedEntries.push(entry);
-        freshIds.add(entry.boatId);
-      }
-    }
-
-    updateRaceData(freshRace.id, freshRace.name, {
-      ...freshRace.info,
-      boats: mergedEntries,
-    });
 
     setImportCount(added);
     setBusy(false);
