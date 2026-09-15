@@ -137,8 +137,6 @@ export interface RaceInfo {
   starts?: StartInfo[];
   scoringMethod?: string;
   pro?: string;
-  assistants?: string[];
-  customAssistants?: boolean;
   confirmedSeparate?: [number, number][];
   assistantPermissions?: AssistantPermissions;
   customPermissions?: boolean;

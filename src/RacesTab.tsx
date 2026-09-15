@@ -257,12 +257,13 @@ function EditBoatForm({
 function CreateSeriesForm({ onDone }: { onDone: () => void }) {
   const { createSeries } = useRaces();
   const [name, setName] = useState("");
+  const [assistants, setAssistants] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (!name.trim()) return;
     setBusy(true);
-    await createSeries(name.trim());
+    await createSeries(name.trim(), assistants.length > 0 ? { assistants } : undefined);
     setName("");
     setBusy(false);
     onDone();
@@ -276,6 +277,7 @@ function CreateSeriesForm({ onDone }: { onDone: () => void }) {
         value={name}
         onChange={(e) => setName(e.target.value)}
       />
+      <AssistantPicker assistants={assistants} onChange={setAssistants} />
       <div className="races-form-actions">
         <button className="btn btn-primary" onClick={submit} disabled={busy || !name.trim()}>
           {busy ? "..." : "Create Series"}
@@ -297,7 +299,7 @@ function CreateRaceForm({
   previousRace: Race | null;
   onDone: () => void;
 }) {
-  const { createRace, addBoatToRace, series } = useRaces();
+  const { createRace, addBoatToRace } = useRaces();
   const { now } = useTime();
   const [name, setName] = useState("");
   const [autoCheckIn, setAutoCheckIn] = useState(true);
@@ -307,24 +309,15 @@ function CreateRaceForm({
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const parentSeries = series.find((s) => s.id === seriesId) || null;
-  const seriesAssistants = parentSeries?.info.assistants || [];
-  const [useCustomAssistants, setUseCustomAssistants] = useState(false);
-  const [assistants, setAssistants] = useState<string[]>([]);
-
   const submit = async () => {
     if (!name.trim()) return;
     setBusy(true);
-
-    const effectiveAssistants = useCustomAssistants ? assistants : seriesAssistants;
 
     const raceInfo: Partial<RaceInfo> = {
       autoCheckIn,
       windCondition,
       courseLength: courseLength.trim() ? Number(courseLength) : undefined,
       notes: notes.trim() || undefined,
-      assistants: effectiveAssistants.length > 0 ? effectiveAssistants : undefined,
-      customAssistants: useCustomAssistants || undefined,
     };
 
     // Boats are added after creation via addBoatToRace (not folded into raceInfo) —
@@ -437,13 +430,7 @@ function CreateRaceForm({
         </label>
       )}
 
-      <AssistantPicker
-        assistants={assistants}
-        onChange={setAssistants}
-        seriesAssistants={parentSeries ? seriesAssistants : undefined}
-        useCustom={useCustomAssistants}
-        onToggleCustom={setUseCustomAssistants}
-      />
+      <p className="races-hint">Assistants are set at the series level and apply to every race in it.</p>
 
       <div className="races-form-actions">
         <button className="btn btn-primary" onClick={submit} disabled={busy || !name.trim()}>
@@ -997,8 +984,6 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
   const [editWind, setEditWind] = useState<string>((race.info.windCondition as string) || "medium");
   const [editCourseLength, setEditCourseLength] = useState(race.info.courseLength != null ? String(race.info.courseLength) : "");
   const [editNotes, setEditNotes] = useState((race.info.notes as string) || "");
-  const [editAssistants, setEditAssistants] = useState<string[]>(race.info.assistants || []);
-  const [useCustomAssistants, setUseCustomAssistants] = useState(!!race.info.customAssistants);
   const [editPermissions, setEditPermissions] = useState<AssistantPermissions>(race.info.assistantPermissions || DEFAULT_PERMISSIONS);
   const [useCustomPermissions, setUseCustomPermissions] = useState(!!race.info.customPermissions);
   const isSelected = selectedRaceId === race.id;
@@ -1027,9 +1012,7 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
   };
 
   const saveRaceEdit = () => {
-    const seriesAssistants = parentSeries?.info.assistants || [];
     const seriesPerms = parentSeries?.info.assistantPermissions || DEFAULT_PERMISSIONS;
-    const effectiveAssistants = useCustomAssistants ? editAssistants : seriesAssistants;
     const effectivePermissions = useCustomPermissions ? editPermissions : seriesPerms;
     updateRaceData(race.id, editName.trim() || race.name, {
       ...race.info,
@@ -1039,8 +1022,6 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
       windCondition: editWind,
       courseLength: editCourseLength.trim() ? Number(editCourseLength) : undefined,
       notes: editNotes.trim() || undefined,
-      assistants: effectiveAssistants,
-      customAssistants: useCustomAssistants || undefined,
       assistantPermissions: effectivePermissions,
       customPermissions: useCustomPermissions || undefined,
     });
@@ -1054,8 +1035,6 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
     setEditWind((race.info.windCondition as string) || "medium");
     setEditCourseLength(race.info.courseLength != null ? String(race.info.courseLength) : "");
     setEditNotes((race.info.notes as string) || "");
-    setEditAssistants(race.info.assistants || []);
-    setUseCustomAssistants(!!race.info.customAssistants);
     setEditPermissions(race.info.assistantPermissions || DEFAULT_PERMISSIONS);
     setUseCustomPermissions(!!race.info.customPermissions);
     setEditingRace(true);
@@ -1156,13 +1135,7 @@ function RaceCard({ race, onSelect, parentSeries, isExpanded, onToggle }: { race
                 onChange={(e) => setEditNotes(e.target.value)}
               />
 
-              <AssistantPicker
-                assistants={editAssistants}
-                onChange={setEditAssistants}
-                seriesAssistants={parentSeries?.info.assistants}
-                useCustom={useCustomAssistants}
-                onToggleCustom={setUseCustomAssistants}
-              />
+              <p className="races-hint">Assistants are set at the series level and apply to every race in it.</p>
 
               <PermissionsPicker
                 permissions={editPermissions}

@@ -148,6 +148,7 @@ interface RaceContextValue {
   removeSeries: (seriesId: number) => Promise<void>;
   refreshAll: () => Promise<void>;
   refreshSelectedRace: () => Promise<void>;
+  refreshSeriesBoats: (seriesId: number) => Promise<void>;
 }
 
 const RaceContext = createContext<RaceContextValue | null>(null);
@@ -173,6 +174,21 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   // Pending creates — races/series/boats waiting on their real ID.
   const pendingCreatesRef = useRef<Map<number, PendingCreate>>(new Map());
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards retryPendingCreates against overlapping runs: it awaits each pending
+  // create sequentially, which can take several seconds. If a new create (e.g.
+  // adding a race right after creating its series) fires its own kick while an
+  // older one is still mid-flight, retryTimerRef.current has already been cleared
+  // (see retryPendingCreates) so that kick would otherwise start a second
+  // concurrent pass over the same still-unresolved entries — double-creating them.
+  const retryInFlightRef = useRef(false);
+  // Set when a new create arrives while a run is already in flight (and so got
+  // deferred rather than starting its own concurrent pass — see retryInFlightRef).
+  // Without this, that new entry would otherwise sit until the *next* run's normal
+  // RETRY_INTERVAL_MS reschedule, compounding: e.g. a race added right after its
+  // series can end up waiting out the series' own retry, then a full extra interval
+  // before its first real attempt even starts. This collapses that second wait to
+  // effectively zero once the in-flight run finishes.
+  const retryImmediateRef = useRef(false);
   // Gates the cache-persist effect below until hydration's setRaces/setSeries/etc.
   // have actually applied. This has to be state, not a ref: setHydrated(true) is
   // deferred to the next render exactly like the hydrated data is, so both become
@@ -250,6 +266,40 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     });
     return merged;
   }, [hasPendingWrite]);
+
+  // Backfill the boat directory (names, sail numbers, etc.) for any boat ID we've
+  // just learned about via race_boats but don't have a record for locally — e.g.
+  // an assistant checked in a brand-new boat (which they, not you, own) on a race
+  // you own, or you're now pulling in a sibling race's boats for the first time.
+  // Without this, that boat only ever shows as its fallback "Boat #123" — every
+  // race_boats fetch (selection, series-wide, periodic poll) runs its boat IDs
+  // through here so the real name/info arrives wherever those boats show up.
+  const knownBoatIdsRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    knownBoatIdsRef.current = new Set(boats.map((b) => b.id));
+  }, [boats]);
+
+  const ensureBoatsLoaded = useCallback((boatIds: number[]) => {
+    if (!auth) return;
+    const missing = Array.from(new Set(boatIds)).filter(
+      (id) => id > 0 && !knownBoatIdsRef.current.has(id)
+    );
+    if (missing.length === 0) return;
+    // Mark as known immediately so concurrent callers (e.g. selection fetch and
+    // series-wide fetch firing together) don't double-fetch the same IDs.
+    missing.forEach((id) => knownBoatIdsRef.current.add(id));
+    Promise.all(
+      missing.map((id) => getBoatsByColumn(auth, "id", id).catch(() => ({ message: "error", results: [] as BoatRecord[] })))
+    ).then((results) => {
+      const fetched = results.flatMap((r) => r.results.map((br: BoatRecord) => parseRecord<BoatInfo>(br)));
+      if (fetched.length === 0) return;
+      setBoats((prev) => {
+        const existingIds = new Set(prev.map((b) => b.id));
+        const toAdd = fetched.filter((b) => !existingIds.has(b.id));
+        return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+      });
+    });
+  }, [auth]);
 
   // Fetch everything for this user and merge it into local state without ever
   // clobbering an edit that hasn't synced yet or a create still waiting on a real ID.
@@ -385,18 +435,44 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     });
   }, [races, series, boats, selectedRaceId, queueTick, user?.id, hydrated]);
 
-  // Fetch race boats when a race is selected, merging with any locally-pending boats
-  useEffect(() => {
-    if (!auth || selectedRaceId == null) return;
-    getRaceBoats(auth, selectedRaceId).then((res) => {
+  // Fetch one race's boats and merge them in, protecting anything not yet synced.
+  const fetchRaceBoatsInto = useCallback((raceId: number) => {
+    if (!auth) return Promise.resolve();
+    return getRaceBoats(auth, raceId).then((res) => {
       const freshBoats = res.rows.map(rowToEntry);
+      ensureBoatsLoaded(freshBoats.map((b) => b.boatId));
       setRaces((prev) => prev.map((r) => {
-        if (r.id !== selectedRaceId) return r;
+        if (r.id !== raceId) return r;
         const localBoats = (r.info.boats || []) as RaceBoatEntry[];
-        return { ...r, info: { ...r.info, boats: mergeRaceBoats(localBoats, freshBoats, selectedRaceId) } };
+        return { ...r, info: { ...r.info, boats: mergeRaceBoats(localBoats, freshBoats, raceId) } };
       }));
     }).catch(() => {});
-  }, [selectedRaceId, auth?.userId, mergeRaceBoats]);
+  }, [auth, mergeRaceBoats, ensureBoatsLoaded]);
+
+  // Fetch every race in a series, not just the one currently selected — otherwise
+  // series-wide results only ever reflect whichever single race you last had open.
+  // Boats for a race someone else is running (as an assistant, say) never arrive
+  // any other way, since the per-selection fetch below only covers your own
+  // selection and the periodic poll only covers that same one race.
+  const refreshSeriesBoats = useCallback(async (seriesId: number) => {
+    if (!auth) return;
+    const s = series.find((s) => s.id === seriesId);
+    if (!s) return;
+    await Promise.all(s.info.raceIds.filter((id) => id > 0).map((id) => fetchRaceBoatsInto(id)));
+  }, [auth, series, fetchRaceBoatsInto]);
+
+  // Fetch race boats when a race is selected, merging with any locally-pending
+  // boats. Also pulls in every sibling race in the same series (see
+  // refreshSeriesBoats) so series-wide results are populated as soon as any one
+  // of its races is opened, not only the one you personally selected.
+  useEffect(() => {
+    if (!auth || selectedRaceId == null) return;
+    const parentSeries = series.find((s) => s.info.raceIds.includes(selectedRaceId));
+    const raceIds = parentSeries
+      ? Array.from(new Set([selectedRaceId, ...parentSeries.info.raceIds]))
+      : [selectedRaceId];
+    raceIds.filter((id) => id > 0).forEach((id) => fetchRaceBoatsInto(id));
+  }, [selectedRaceId, auth?.userId, series, fetchRaceBoatsInto]);
 
   // Periodically refresh the selected race data to pick up changes from other users
   useEffect(() => {
@@ -419,6 +495,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
           getRaceBoats(auth, selectedRaceId),
         ]);
         const freshBoats = boatsRes.rows.map(rowToEntry);
+        ensureBoatsLoaded(freshBoats.map((b) => b.boatId));
         setRaces((prev) => prev.map((r) => {
           if (r.id !== selectedRaceId) return r;
           const localBoats = (r.info.boats || []) as RaceBoatEntry[];
@@ -439,7 +516,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     }, interval);
 
     return () => clearInterval(timer);
-  }, [selectedRaceId, auth?.userId, auth?.token, hasPendingWrite, mergeRaceBoats]);
+  }, [selectedRaceId, auth?.userId, auth?.token, hasPendingWrite, mergeRaceBoats, ensureBoatsLoaded]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -559,29 +636,37 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   const RETRY_INTERVAL_MS = 5000;
 
   const retryPendingCreates = useCallback(async () => {
+    if (retryInFlightRef.current) return;
     retryTimerRef.current = null;
     if (!auth || pendingCreatesRef.current.size === 0) return;
 
-    const entries = Array.from(pendingCreatesRef.current.entries());
-    for (const [tempId, spec] of entries) {
-      try {
-        if (spec.kind === "boat") {
-          const res = await addBoat(auth, spec.name, spec.info);
-          resolveBoat(tempId, parseRecord<BoatInfo>(res.boat[0]).id);
-        } else if (spec.kind === "race") {
-          const res = await addRace(auth, spec.name, spec.info);
-          resolveRace(tempId, parseRecord<RaceInfo>(res.race[0]), spec.seriesId);
-        } else {
-          const res = await addSeries(auth, spec.name, spec.info);
-          resolveSeries(tempId, parseRecord<SeriesInfo>(res.series[0]).id);
+    retryInFlightRef.current = true;
+    try {
+      const entries = Array.from(pendingCreatesRef.current.entries());
+      for (const [tempId, spec] of entries) {
+        try {
+          if (spec.kind === "boat") {
+            const res = await addBoat(auth, spec.name, spec.info);
+            resolveBoat(tempId, parseRecord<BoatInfo>(res.boat[0]).id);
+          } else if (spec.kind === "race") {
+            const res = await addRace(auth, spec.name, spec.info);
+            resolveRace(tempId, parseRecord<RaceInfo>(res.race[0]), spec.seriesId);
+          } else {
+            const res = await addSeries(auth, spec.name, spec.info);
+            resolveSeries(tempId, parseRecord<SeriesInfo>(res.series[0]).id);
+          }
+        } catch {
+          // Still offline or failed — leave it queued, try again next cycle
         }
-      } catch {
-        // Still offline or failed — leave it queued, try again next cycle
       }
+    } finally {
+      retryInFlightRef.current = false;
     }
 
     if (pendingCreatesRef.current.size > 0) {
-      retryTimerRef.current = setTimeout(() => retryPendingCreates(), RETRY_INTERVAL_MS);
+      const delay = retryImmediateRef.current ? 0 : RETRY_INTERVAL_MS;
+      retryImmediateRef.current = false;
+      retryTimerRef.current = setTimeout(() => retryPendingCreates(), delay);
     } else if (pendingUpdates.current.size === 0) {
       setSynced(true);
     }
@@ -604,8 +689,12 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     pendingCreatesRef.current.set(tempId, { kind: "series", name, info: seriesInfo });
     touchQueue();
     setSynced(false);
-    if (auth && !retryTimerRef.current) {
-      retryTimerRef.current = setTimeout(() => retryPendingCreates(), 0);
+    if (auth) {
+      if (retryInFlightRef.current) {
+        retryImmediateRef.current = true;
+      } else if (!retryTimerRef.current) {
+        retryTimerRef.current = setTimeout(() => retryPendingCreates(), 0);
+      }
     }
     return optimistic;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -640,8 +729,12 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     pendingCreatesRef.current.set(tempId, { kind: "race", name, seriesId: effectiveSeriesId, info: raceInfo });
     touchQueue();
     setSynced(false);
-    if (auth && !retryTimerRef.current) {
-      retryTimerRef.current = setTimeout(() => retryPendingCreates(), 0);
+    if (auth) {
+      if (retryInFlightRef.current) {
+        retryImmediateRef.current = true;
+      } else if (!retryTimerRef.current) {
+        retryTimerRef.current = setTimeout(() => retryPendingCreates(), 0);
+      }
     }
     return optimistic;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -654,8 +747,12 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     pendingCreatesRef.current.set(tempId, { kind: "boat", name, info, raceIds: [] });
     touchQueue();
     setSynced(false);
-    if (auth && !retryTimerRef.current) {
-      retryTimerRef.current = setTimeout(() => retryPendingCreates(), 0);
+    if (auth) {
+      if (retryInFlightRef.current) {
+        retryImmediateRef.current = true;
+      } else if (!retryTimerRef.current) {
+        retryTimerRef.current = setTimeout(() => retryPendingCreates(), 0);
+      }
     }
     return tempBoat;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -846,6 +943,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         softDeleteBoat, removeRace, removeSeries,
         refreshAll,
         refreshSelectedRace,
+        refreshSeriesBoats,
       }}
     >
       {children}

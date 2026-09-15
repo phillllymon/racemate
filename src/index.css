@@ -674,6 +674,11 @@ body {
   font-size: 0.9rem;
 }
 
+.races-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 .races-empty {
   font-size: 0.9rem;
   color: var(--text-muted);

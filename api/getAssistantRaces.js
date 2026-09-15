@@ -40,30 +40,33 @@ module.exports.default = async function handler(req, res) {
                 return;
             }
 
-            // Find all races, then filter in JS for ones where user is an assistant
-            const allRaces = await sql`SELECT * FROM races`;
-            const assistantRaces = allRaces.filter(r => {
+            // Assistants are granted at the series level, not per-race — find every
+            // series listing this user as an assistant, then return every race
+            // belonging to any of those series.
+            const allSeries = await sql`SELECT * FROM series`;
+            const relevantSeries = allSeries.filter(s => {
                 try {
-                    const info = typeof r.info === 'string' ? JSON.parse(r.info) : r.info;
+                    const info = typeof s.info === 'string' ? JSON.parse(s.info) : s.info;
                     return Array.isArray(info.assistants) && info.assistants.includes(userId);
                 } catch {
                     return false;
                 }
             });
 
-            // Find series containing these races
-            const raceIds = assistantRaces.map(r => r.id);
-            let relevantSeries = [];
-            if (raceIds.length > 0) {
-                const allSeries = await sql`SELECT * FROM series`;
-                relevantSeries = allSeries.filter(s => {
-                    try {
-                        const info = typeof s.info === 'string' ? JSON.parse(s.info) : s.info;
-                        return Array.isArray(info.raceIds) && info.raceIds.some(id => raceIds.includes(id));
-                    } catch {
-                        return false;
-                    }
-                });
+            const raceIdSet = new Set();
+            relevantSeries.forEach(s => {
+                try {
+                    const info = typeof s.info === 'string' ? JSON.parse(s.info) : s.info;
+                    (info.raceIds || []).forEach(id => raceIdSet.add(id));
+                } catch {
+                    /* skip malformed series info */
+                }
+            });
+
+            let assistantRaces = [];
+            if (raceIdSet.size > 0) {
+                const allRaces = await sql`SELECT * FROM races`;
+                assistantRaces = allRaces.filter(r => raceIdSet.has(r.id));
             }
 
             res.writeHead(200, { "Content-Type": "application/json" });

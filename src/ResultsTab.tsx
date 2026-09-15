@@ -1335,7 +1335,7 @@ function exportSeriesCSVWithSummary(
 // ---- Main ResultsTab ----
 
 export default function ResultsTab() {
-  const { selectedRace, races, series, boats, updateSeriesData, patchRaceInfo, patchSeriesInfo } = useRaces();
+  const { selectedRace, races, series, boats, updateSeriesData, patchRaceInfo, patchSeriesInfo, refreshSeriesBoats } = useRaces();
   const { user, token } = useAuth();
   const auth = user && token ? { userId: user.id, token } : null;
   const [viewMode, setViewMode] = useState<"race" | "series">("race");
@@ -1583,7 +1583,15 @@ export default function ResultsTab() {
           </button>
           <button
             className={`start-mode-btn ${viewMode === "series" ? "start-mode-btn--active" : ""}`}
-            onClick={() => setViewMode("series")}
+            onClick={() => {
+              setViewMode("series");
+              // Backup fetch: the per-race-selection effect already pulls in every
+              // race in this series, but re-fetch here too so switching to series
+              // view always has a chance to pick up other races' boats as long as
+              // you have a connection right now, regardless of what was fetched
+              // (or missed) whenever this race was first selected.
+              if (parentSeries) refreshSeriesBoats(parentSeries.id);
+            }}
           >
             Series
           </button>
