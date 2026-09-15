@@ -600,6 +600,7 @@ function StartCard({
   onBulkStatus,
   onSaveEdit,
   onRecall,
+  onAbort,
 }: {
   start: StartInfo;
   startIndex: number;
@@ -610,6 +611,7 @@ function StartCard({
   onBulkStatus: (updates: Array<{ boatId: number; status: string }>) => void;
   onSaveEdit: (updatedStart: StartInfo, boatUpdates: Array<{ boatId: number; status: string }>) => void;
   onRecall: (startId: string) => void;
+  onAbort: (startId: string) => void;
 }) {
   const { now } = useTime();
   const [expanded, setExpanded] = useState(true);
@@ -864,14 +866,22 @@ function StartCard({
           {phase === "racing" && (
             <button className="post-start-racing-btn" onClick={() => setOcsComplete(false)}>
               <span className="post-start-racing-label">Racing</span>
-              <span className="post-start-racing-hint">tap to re-open OCS check</span>
+              <span className="post-start-racing-ocs-btn">Mark OCS</span>
             </button>
           )}
 
-          {/* Recall button */}
+          {/* Recall button — pre-start delay/push */}
           {phase === "countdown" && startTime != null && (
             <button className="btn btn-secondary btn-recall" onClick={() => onRecall(start.id)}>
               General Recall
+            </button>
+          )}
+
+          {/* Abort button — post-start full reset, since General Recall only exists
+              pre-start and there was previously no way to undo a start once it fired */}
+          {phase !== "countdown" && startTime != null && (
+            <button className="btn btn-secondary btn-recall" onClick={() => onAbort(start.id)}>
+              Abort Start
             </button>
           )}
 
@@ -955,12 +965,39 @@ function RecallDialog({
   );
 }
 
+// ---- Abort dialog (post-start full reset) ----
+
+function AbortDialog({
+  startIdx,
+  onConfirm,
+  onCancel,
+}: {
+  startIdx: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="recall-dialog">
+      <div className="edit-boat-title">Abort Start {startIdx + 1}?</div>
+      <p className="races-empty" style={{ padding: 0, textAlign: "left" }}>
+        This clears the start time and puts every boat in this start back to
+        checked-in. You'll need to set a new start time to run it again.
+      </p>
+      <div className="races-form-actions">
+        <button className="btn btn-primary" onClick={onConfirm}>Confirm Abort</button>
+        <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 // ---- Main StartTab ----
 
 export default function StartTab() {
-  const { selectedRace, updateRaceData } = useRaces();
+  const { selectedRace, updateRaceData, updateBoatInRace } = useRaces();
   const [creatingStart, setCreatingStart] = useState(false);
   const [recallStartId, setRecallStartId] = useState<string | null>(null);
+  const [abortStartId, setAbortStartId] = useState<string | null>(null);
 
   if (!selectedRace) {
     return (
@@ -1025,23 +1062,47 @@ export default function StartTab() {
       return s;
     });
 
-    // Reset boats in the recalled start back to checked-in
-    const recalledStart = starts[startIdx];
-    const boatsInStart = raceBoats.filter((rb) => recalledStart.classes.includes(rb.class));
-    const updatedBoats = raceBoats.map((b) => {
-      const inStart = boatsInStart.find((bs) => bs.boatId === b.boatId);
-      if (inStart && (b.status === "racing" || b.status === "over-early")) {
-        return { ...b, status: "checked-in" };
-      }
-      return b;
-    });
-
     updateRaceData(selectedRace.id, selectedRace.name, {
       ...raceInfo,
       starts: newStarts,
-      boats: updatedBoats,
+    });
+
+    // Reset boats in the recalled start back to checked-in. Each boat is synced
+    // individually via updateBoatInRace (not bundled into the updateRaceData call
+    // above) — updateRaceData strips `boats` before persisting to the server, since
+    // boats live in the separate race_boats table, so a status change folded into
+    // that call would only ever exist in local state and vanish on refresh.
+    const recalledStart = starts[startIdx];
+    const boatsInStart = raceBoats.filter((rb) => recalledStart.classes.includes(rb.class));
+    boatsInStart.forEach((rb) => {
+      if (rb.status === "racing" || rb.status === "over-early") {
+        updateBoatInRace(selectedRace.id, rb.boatId, (b) => ({ ...b, status: "checked-in" }));
+      }
     });
     setRecallStartId(null);
+  };
+
+  const handleAbort = (startId: string) => {
+    setAbortStartId(startId);
+  };
+
+  const confirmAbort = () => {
+    const startIdx = starts.findIndex((s) => s.id === abortStartId);
+    if (startIdx === -1) return;
+
+    // Full reset: clear the start time entirely (unlike General Recall, which only
+    // pushes it forward) and put every boat in this start back to checked-in — a
+    // fresh start has to be set to run it again.
+    const abortedStart = starts[startIdx];
+    updateStarts(starts.map((s) => (s.id === abortedStart.id ? { ...s, startTime: null } : s)));
+
+    const boatsInStart = raceBoats.filter((rb) => abortedStart.classes.includes(rb.class));
+    boatsInStart.forEach((rb) => {
+      if (rb.status === "racing" || rb.status === "over-early" || rb.status === "OCS") {
+        updateBoatInRace(selectedRace.id, rb.boatId, (b) => ({ ...b, status: "checked-in" }));
+      }
+    });
+    setAbortStartId(null);
   };
 
   return (
@@ -1052,6 +1113,14 @@ export default function StartTab() {
           recallStartId={recallStartId}
           onConfirm={confirmRecall}
           onCancel={() => setRecallStartId(null)}
+        />
+      )}
+
+      {abortStartId && (
+        <AbortDialog
+          startIdx={starts.findIndex((s) => s.id === abortStartId)}
+          onConfirm={confirmAbort}
+          onCancel={() => setAbortStartId(null)}
         />
       )}
 
@@ -1069,13 +1138,10 @@ export default function StartTab() {
           otherStartClasses={otherStartClasses}
           onUpdateStart={updateStart}
           onBulkStatus={(updates) => {
-            const updateMap = new Map(updates.map((u) => [u.boatId, u.status]));
-            const updatedBoats = raceBoats.map((b) =>
-              updateMap.has(b.boatId) ? { ...b, status: updateMap.get(b.boatId)! } : b
-            );
-            updateRaceData(selectedRace.id, selectedRace.name, {
-              ...raceInfo,
-              boats: updatedBoats,
+            // Per-boat updateBoatInRace (not updateRaceData) so each status change
+            // actually syncs to race_boats instead of only updating local state.
+            updates.forEach((u) => {
+              updateBoatInRace(selectedRace.id, u.boatId, (b) => ({ ...b, status: u.status }));
             });
           }}
           onSaveEdit={(updatedStart, boatUpdates) => {
@@ -1087,17 +1153,16 @@ export default function StartTab() {
                 if (b.startTime == null) return -1;
                 return a.startTime - b.startTime;
               });
-            const updateMap = new Map(boatUpdates.map((u) => [u.boatId, u.status]));
-            const updatedBoats = raceBoats.map((b) =>
-              updateMap.has(b.boatId) ? { ...b, status: updateMap.get(b.boatId)! } : b
-            );
             updateRaceData(selectedRace.id, selectedRace.name, {
               ...raceInfo,
               starts: newStarts,
-              boats: updatedBoats,
+            });
+            boatUpdates.forEach((u) => {
+              updateBoatInRace(selectedRace.id, u.boatId, (b) => ({ ...b, status: u.status }));
             });
           }}
           onRecall={handleRecall}
+          onAbort={handleAbort}
         />
         );
       })}

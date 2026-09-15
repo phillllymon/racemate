@@ -6,11 +6,11 @@ import {
   addSeries, updateSeries, getSeriesByColumn, deleteSeries,
   addBoat, updateBoat, getBoatsByColumn,
   getAssistantRaces,
-  addRaceBoat, updateRaceBoat, deleteRaceBoat, getRaceBoats, rowToEntry,
+  addRaceBoat, deleteRaceBoat, getRaceBoats, rowToEntry,
 } from "./api";
 import type {
   RaceRecord, SeriesRecord, BoatRecord,
-  RaceInfo, SeriesInfo, BoatInfo, RaceBoatEntry,
+  RaceInfo, SeriesInfo, BoatInfo, RaceBoatEntry, RaceBoatRow,
 } from "./api";
 
 // ---- Parsed types ----
@@ -41,6 +41,81 @@ function parseRecord<T>(rec: { id: number; name: string; info: string }): { id: 
     parsed = {} as T;
   }
   return { id: rec.id, name: rec.name, info: parsed };
+}
+
+// ---- Durable sync queue ----
+//
+// Everything that needs to reach the server is described as plain data (never a
+// closure), so it can be written to localStorage and replayed after a reload —
+// the app has to keep working (create a race, check boats in, run it, see results)
+// with no connection at all, and pick back up wherever it left off once one of the
+// periodic sync attempts succeeds.
+
+type Auth = { userId: string; token: string };
+
+type PendingWrite =
+  | { kind: "updateRace"; raceId: number; name: string; info: RaceInfo }
+  | { kind: "updateSeries"; seriesId: number; name: string; info: SeriesInfo }
+  | { kind: "updateBoat"; boatId: number; name: string; info: BoatInfo }
+  // Add-or-edit a single race_boat row. One kind covers both cases (the server side
+  // is an upsert) so the queue never has to know whether a given boat's insert has
+  // actually reached the server yet before deciding whether a later edit is an
+  // "insert" or an "update" — it's always just "here's this row's current state."
+  | { kind: "syncRaceBoat"; raceId: number; entry: RaceBoatEntry }
+  | { kind: "deleteRaceBoat"; raceId: number; boatId: number }
+  | { kind: "deleteRace"; raceId: number }
+  | { kind: "deleteSeries"; seriesId: number };
+
+async function executeWrite(auth: Auth, write: PendingWrite): Promise<unknown> {
+  switch (write.kind) {
+    case "updateRace": return updateRace(auth, write.raceId, write.name, write.info);
+    case "updateSeries": return updateSeries(auth, write.seriesId, write.name, write.info);
+    case "updateBoat": return updateBoat(auth, write.boatId, write.name, write.info);
+    case "syncRaceBoat": return addRaceBoat(auth, write.raceId, write.entry);
+    case "deleteRaceBoat": return deleteRaceBoat(auth, write.raceId, write.boatId);
+    case "deleteRace": return deleteRace(auth, write.raceId);
+    case "deleteSeries": return deleteSeries(auth, write.seriesId);
+  }
+}
+
+// A create that hasn't been confirmed by the server yet, tracked under its
+// temporary (large negative) local ID until it resolves to a real one.
+type PendingCreate =
+  | { kind: "boat"; name: string; info: BoatInfo; raceIds: number[] }
+  | { kind: "race"; name: string; seriesId: number | null; info: RaceInfo }
+  | { kind: "series"; name: string; info: SeriesInfo };
+
+// ---- Local cache (per-user, survives reload/logout-login on this device) ----
+
+const CACHE_VERSION = 1;
+const cacheKey = (userId: string) => `racemate-cache-v${CACHE_VERSION}-${userId}`;
+
+interface CachedState {
+  races: Race[];
+  series: Series[];
+  boats: Boat[];
+  selectedRaceId: number | null;
+  pendingWrites: [string, PendingWrite][];
+  pendingCreates: [number, PendingCreate][];
+}
+
+function loadCache(userId: string): CachedState | null {
+  try {
+    const raw = localStorage.getItem(cacheKey(userId));
+    if (!raw) return null;
+    return JSON.parse(raw) as CachedState;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(userId: string, state: CachedState) {
+  try {
+    localStorage.setItem(cacheKey(userId), JSON.stringify(state));
+  } catch {
+    // Storage full or unavailable (e.g. private browsing) — in-memory state still
+    // works for this session, it just won't survive a reload.
+  }
 }
 
 // ---- Context value ----
@@ -85,19 +160,27 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   const [selectedRaceId, setSelectedRaceId] = useState<number | null>(null);
   const [synced, setSynced] = useState(true);
   const [loading, setLoading] = useState(true);
+  // Bumped whenever the ref-based queues (pendingUpdates/pendingCreatesRef) mutate,
+  // so the cache-persist effect below (which can't watch refs directly) re-runs.
+  const [queueTick, setQueueTick] = useState(0);
+  const touchQueue = useCallback(() => setQueueTick((t) => t + 1), []);
 
-  // Sync queue
-  const pendingUpdates = useRef<Map<string, () => Promise<unknown>>>(new Map());
+  // Sync queue — plain data, not closures, so it can be persisted (see PendingWrite).
+  const pendingUpdates = useRef<Map<string, PendingWrite>>(new Map());
   const inFlightKeys = useRef<Set<string>>(new Set());
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Pending boats: temp ID boats waiting for server confirmation
-  const pendingBoatsRef = useRef<Map<number, {
-    name: string;
-    info: BoatInfo;
-    raceIds: number[];
-  }>>(new Map());
+  // Pending creates — races/series/boats waiting on their real ID.
+  const pendingCreatesRef = useRef<Map<number, PendingCreate>>(new Map());
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Gates the cache-persist effect below until hydration's setRaces/setSeries/etc.
+  // have actually applied. This has to be state, not a ref: setHydrated(true) is
+  // deferred to the next render exactly like the hydrated data is, so both become
+  // visible to the persist effect together. A ref's .current would flip immediately
+  // within the same commit — before races/series/boats catch up — so the persist
+  // effect would still fire once against the pre-hydration empty state and
+  // overwrite a good cache with blanks.
+  const [hydrated, setHydrated] = useState(false);
 
   const auth = user && token ? { userId: user.id, token } : null;
 
@@ -108,53 +191,70 @@ export function RaceProvider({ children }: { children: ReactNode }) {
 
   // Flush pending updates to backend
   const flush = useCallback(async () => {
-    if (pendingUpdates.current.size === 0) {
-      setSynced(true);
+    if (!auth || pendingUpdates.current.size === 0) {
+      if (pendingCreatesRef.current.size === 0) setSynced(true);
       return;
     }
-    const batch = new Map(pendingUpdates.current);
+    const batch = Array.from(pendingUpdates.current.entries());
     pendingUpdates.current.clear();
+    batch.forEach(([key]) => inFlightKeys.current.add(key));
 
-    // Track in-flight keys
-    batch.forEach((_, key) => inFlightKeys.current.add(key));
+    await Promise.allSettled(
+      batch.map(([key, write]) =>
+        executeWrite(auth, write).catch((e) => {
+          // Re-queue only this specific failed write, not the whole batch
+          if (!pendingUpdates.current.has(key)) pendingUpdates.current.set(key, write);
+          throw e;
+        })
+      )
+    );
 
-    try {
-      const promises = Array.from(batch.values()).map((fn) => fn());
-      await Promise.all(promises);
-    } catch (_e) {
-      // Re-queue failed updates
-      batch.forEach((fn, key) => {
-        if (!pendingUpdates.current.has(key)) {
-          pendingUpdates.current.set(key, fn);
-        }
-      });
-    }
+    batch.forEach(([key]) => inFlightKeys.current.delete(key));
+    touchQueue();
 
-    // Clear in-flight keys
-    batch.forEach((_, key) => inFlightKeys.current.delete(key));
-
-    if (pendingUpdates.current.size === 0 && pendingBoatsRef.current.size === 0) {
+    if (pendingUpdates.current.size === 0 && pendingCreatesRef.current.size === 0) {
       setSynced(true);
     } else {
       scheduleFlush();
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth]);
 
   const scheduleFlush = useCallback(() => {
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(flush, 5000);
   }, [flush]);
 
-  const queueUpdate = useCallback((key: string, fn: () => Promise<unknown>) => {
-    pendingUpdates.current.set(key, fn);
+  const queueUpdate = useCallback((key: string, write: PendingWrite) => {
+    pendingUpdates.current.set(key, write);
     setSynced(false);
+    touchQueue();
     scheduleFlush();
-  }, [scheduleFlush]);
+  }, [scheduleFlush, touchQueue]);
 
-  // Load all data on mount
+  // Merge freshly-fetched race_boats rows with local state: a row with a write
+  // still queued keeps its local value (so a background poll can't revert an edit
+  // that just hasn't reached the server yet), and any local-only row not yet
+  // confirmed server-side (still on a temp ID, or its add is still queued) survives.
+  const mergeRaceBoats = useCallback((localBoats: RaceBoatEntry[], freshBoats: RaceBoatEntry[], raceId: number) => {
+    const freshIds = new Set(freshBoats.map((b) => b.boatId));
+    const merged = freshBoats.map((fresh) => {
+      if (hasPendingWrite(`race-boat-${raceId}-${fresh.boatId}`)) {
+        const local = localBoats.find((b) => b.boatId === fresh.boatId);
+        if (local) return local;
+      }
+      return fresh;
+    });
+    localBoats.forEach((b) => {
+      if (!freshIds.has(b.boatId)) merged.push(b);
+    });
+    return merged;
+  }, [hasPendingWrite]);
+
+  // Fetch everything for this user and merge it into local state without ever
+  // clobbering an edit that hasn't synced yet or a create still waiting on a real ID.
   const refreshAll = useCallback(async () => {
     if (!auth) return;
-    setLoading(true);
     try {
       const [seriesRes, racesRes, boatsRes, assistantRes] = await Promise.all([
         getSeriesByColumn(auth, "owner", auth.userId),
@@ -163,7 +263,6 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         getAssistantRaces(auth).catch(() => ({ races: [], series: [] })),
       ]);
 
-      // Merge owned and assistant races/series, deduplicating by id
       const ownedRaces = racesRes.results.map((r: RaceRecord) => parseRecord<RaceInfo>(r));
       const assistRaces = (assistantRes.races || []).map((r: RaceRecord) => parseRecord<RaceInfo>(r));
       const ownedSeries = seriesRes.results.map((r: SeriesRecord) => parseRecord<SeriesInfo>(r));
@@ -177,18 +276,27 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       ownedSeries.forEach((s) => seriesMap.set(s.id, s));
       assistSeries.forEach((s) => { if (!seriesMap.has(s.id)) seriesMap.set(s.id, s); });
 
-      // Collect boat IDs from assistant races that we don't own
+      // Collect boat IDs from assistant races that we don't own. Fetched from the
+      // real race_boats table (getRaceBoats), not race.info.boats — every write path
+      // (updateRaceData/patchRaceInfo) strips `boats` before persisting a race, so
+      // that field is always empty server-side and can't be used to find these IDs.
       const ownedBoats = boatsRes.results.map((r: BoatRecord) => parseRecord<BoatInfo>(r));
       const ownedBoatIds = new Set(ownedBoats.map((b) => b.id));
       const missingBoatIds = new Set<number>();
-      assistRaces.forEach((race) => {
-        (race.info.boats || []).forEach((rb) => {
-          if (!ownedBoatIds.has(rb.boatId)) missingBoatIds.add(rb.boatId);
+      if (assistRaces.length > 0) {
+        const raceBoatsResults = await Promise.all(
+          assistRaces.map((race) =>
+            getRaceBoats(auth, race.id).catch(() => ({ message: "error", rows: [] as RaceBoatRow[] }))
+          )
+        );
+        raceBoatsResults.forEach((res) => {
+          res.rows.map(rowToEntry).forEach((rb) => {
+            if (!ownedBoatIds.has(rb.boatId)) missingBoatIds.add(rb.boatId);
+          });
         });
-      });
+      }
 
-      // Fetch missing boats by ID
-      let allBoats = ownedBoats;
+      let freshBoats = ownedBoats;
       if (missingBoatIds.size > 0) {
         const fetches = Array.from(missingBoatIds).map((id) =>
           getBoatsByColumn(auth, "id", id).catch(() => ({ results: [] as BoatRecord[] }))
@@ -197,21 +305,85 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         const extraBoats = results.flatMap((r) =>
           r.results.map((br: BoatRecord) => parseRecord<BoatInfo>(br))
         );
-        allBoats = [...ownedBoats, ...extraBoats];
+        freshBoats = [...ownedBoats, ...extraBoats];
       }
 
-      setRaces(Array.from(raceMap.values()));
-      setSeries(Array.from(seriesMap.values()));
-      setBoats(allBoats);
-    } catch (_e) {
-      // Keep existing state on error
-    }
-    setLoading(false);
-  }, [auth?.userId, auth?.token]);
+      setRaces((prev) => {
+        const merged = Array.from(raceMap.values()).map((fresh) => {
+          const existing = prev.find((r) => r.id === fresh.id);
+          if (existing && hasPendingWrite(`race-${fresh.id}`)) return existing;
+          // race_boats isn't part of this row server-side — keep whatever's loaded locally.
+          return { ...fresh, info: { ...fresh.info, boats: existing?.info.boats || [] } };
+        });
+        prev.forEach((r) => { if (!raceMap.has(r.id)) merged.push(r); });
+        return merged;
+      });
 
+      setSeries((prev) => {
+        const merged = Array.from(seriesMap.values()).map((fresh) => {
+          const existing = prev.find((s) => s.id === fresh.id);
+          if (existing && hasPendingWrite(`series-${fresh.id}`)) return existing;
+          return fresh;
+        });
+        prev.forEach((s) => { if (!seriesMap.has(s.id)) merged.push(s); });
+        return merged;
+      });
+
+      setBoats((prev) => {
+        const freshIds = new Set(freshBoats.map((b) => b.id));
+        const merged = freshBoats.map((fresh) => {
+          const existing = prev.find((b) => b.id === fresh.id);
+          if (existing && hasPendingWrite(`boat-${fresh.id}`)) return existing;
+          return fresh;
+        });
+        prev.forEach((b) => { if (!freshIds.has(b.id)) merged.push(b); });
+        return merged;
+      });
+    } catch (_e) {
+      // Offline or request failed — local state (from cache or this session) stands.
+    }
+  }, [auth?.userId, auth?.token, hasPendingWrite]);
+
+  // On login: hydrate from this device's cache first (instant, works offline), then
+  // reconcile with the server in the background. Only block on the network fetch
+  // if there's no cache at all yet (first time this user's data has loaded here).
   useEffect(() => {
-    refreshAll();
+    setHydrated(false);
+    if (!user?.id) { setLoading(false); setHydrated(true); return; }
+    const cached = loadCache(user.id);
+    if (cached) {
+      setRaces(cached.races);
+      setSeries(cached.series);
+      setBoats(cached.boats);
+      if (cached.selectedRaceId != null) setSelectedRaceId(cached.selectedRaceId);
+      pendingUpdates.current = new Map(cached.pendingWrites);
+      pendingCreatesRef.current = new Map(cached.pendingCreates);
+      setSynced(pendingUpdates.current.size === 0 && pendingCreatesRef.current.size === 0);
+      setLoading(false);
+      if (pendingUpdates.current.size > 0) scheduleFlush();
+      if (pendingCreatesRef.current.size > 0 && !retryTimerRef.current) {
+        retryTimerRef.current = setTimeout(retryPendingCreates, 0);
+      }
+      refreshAll();
+    } else {
+      setLoading(true);
+      refreshAll().finally(() => setLoading(false));
+    }
+    setHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  // Persist local state to this device's cache whenever it changes, so a reload,
+  // logout/login, or lost connection never loses anything already known locally.
+  // Gated on `hydrated` — see its declaration for why that has to be state.
+  useEffect(() => {
+    if (!user?.id || !hydrated) return;
+    saveCache(user.id, {
+      races, series, boats, selectedRaceId,
+      pendingWrites: Array.from(pendingUpdates.current.entries()),
+      pendingCreates: Array.from(pendingCreatesRef.current.entries()),
+    });
+  }, [races, series, boats, selectedRaceId, queueTick, user?.id, hydrated]);
 
   // Fetch race boats when a race is selected, merging with any locally-pending boats
   useEffect(() => {
@@ -220,13 +392,11 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       const freshBoats = res.rows.map(rowToEntry);
       setRaces((prev) => prev.map((r) => {
         if (r.id !== selectedRaceId) return r;
-        const serverBoatIds = new Set(freshBoats.map((b) => b.boatId));
         const localBoats = (r.info.boats || []) as RaceBoatEntry[];
-        const pendingLocal = localBoats.filter((b) => !serverBoatIds.has(b.boatId));
-        return { ...r, info: { ...r.info, boats: [...freshBoats, ...pendingLocal] } };
+        return { ...r, info: { ...r.info, boats: mergeRaceBoats(localBoats, freshBoats, selectedRaceId) } };
       }));
     }).catch(() => {});
-  }, [selectedRaceId, auth?.userId]);
+  }, [selectedRaceId, auth?.userId, mergeRaceBoats]);
 
   // Periodically refresh the selected race data to pick up changes from other users
   useEffect(() => {
@@ -251,11 +421,8 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         const freshBoats = boatsRes.rows.map(rowToEntry);
         setRaces((prev) => prev.map((r) => {
           if (r.id !== selectedRaceId) return r;
-          // Merge: server boats take precedence; keep local-only boats not yet confirmed
-          const serverBoatIds = new Set(freshBoats.map((b) => b.boatId));
           const localBoats = (r.info.boats || []) as RaceBoatEntry[];
-          const pendingLocal = localBoats.filter((b) => !serverBoatIds.has(b.boatId));
-          const mergedBoats = [...freshBoats, ...pendingLocal];
+          const mergedBoats = mergeRaceBoats(localBoats, freshBoats, selectedRaceId);
           if (raceRes && raceRes.results.length === 1 && !hasPendingWrite(`race-${selectedRaceId}`)) {
             const freshRace = parseRecord<RaceInfo>(raceRes.results[0]);
             // Preserve locally-added empty classes that haven't been synced yet
@@ -267,14 +434,14 @@ export function RaceProvider({ children }: { children: ReactNode }) {
           return { ...r, info: { ...r.info, boats: mergedBoats } };
         }));
       } catch {
-        // ignore
+        // ignore — will retry next interval
       }
     }, interval);
 
     return () => clearInterval(timer);
-  }, [selectedRaceId, auth?.userId, auth?.token]);
+  }, [selectedRaceId, auth?.userId, auth?.token, hasPendingWrite, mergeRaceBoats]);
 
-  // Cleanup timer on unmount
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
       if (syncTimer.current) clearTimeout(syncTimer.current);
@@ -295,48 +462,167 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       if (raceRes.results.length === 1) {
         const fresh = parseRecord<RaceInfo>(raceRes.results[0]);
         const freshBoats = boatsRes.rows.map(rowToEntry);
-        fresh.info.boats = freshBoats;
-        setRaces((prev) => prev.map((r) => r.id === fresh.id ? fresh : r));
+        setRaces((prev) => prev.map((r) => {
+          if (r.id !== fresh.id) return r;
+          const localBoats = (r.info.boats || []) as RaceBoatEntry[];
+          return { ...fresh, info: { ...fresh.info, boats: mergeRaceBoats(localBoats, freshBoats, selectedRaceId) } };
+        }));
       }
     } catch {
       // Keep existing state
     }
-  }, [auth?.userId, auth?.token, selectedRaceId]);
+  }, [auth?.userId, auth?.token, selectedRaceId, mergeRaceBoats]);
 
-  const createSeries = async (name: string, info?: Partial<SeriesInfo>): Promise<Series> => {
-    if (!auth) throw new Error("Not authenticated");
-    const seriesInfo: SeriesInfo = { name, raceIds: [], ...info };
-    // Optimistic: add to local state with temp ID immediately
-    const tempId = -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
-    const optimistic: Series = { id: tempId, name, info: seriesInfo };
-    setSeries((prev) => [...prev, optimistic]);
-    // Create on server, then swap temp ID with real ID
-    try {
-      const res = await addSeries(auth, name, seriesInfo);
-      const created = parseRecord<SeriesInfo>(res.series[0]);
-      setSeries((prev) => prev.map((s) => s.id === tempId ? created : s));
-      return created;
-    } catch {
-      // Remove optimistic entry on failure
-      setSeries((prev) => prev.filter((s) => s.id !== tempId));
-      throw new Error("Failed to create series");
-    }
+  const generateTempId = (): number => {
+    // Large negative number to avoid collision with real DB IDs
+    return -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
   };
 
-  const createRace = async (
+  // A temp boat's real ID has arrived — swap it everywhere it's referenced and
+  // sync any races it was added to while it was still temp (those syncs were
+  // skipped until now, since a temp boat ID can't be written to race_boats).
+  const resolveBoat = useCallback((tempId: number, realId: number) => {
+    setBoats((prev) => prev.map((b) => (b.id === tempId ? { ...b, id: realId } : b)));
+    const pending = pendingCreatesRef.current.get(tempId);
+    if (pending && pending.kind === "boat") {
+      setRaces((prevRaces) =>
+        prevRaces.map((race) => {
+          if (!pending.raceIds.includes(race.id)) return race;
+          const updatedBoats = (race.info.boats || []).map((rb) =>
+            rb.boatId === tempId ? { ...rb, boatId: realId } : rb
+          );
+          const swapped = updatedBoats.find((rb) => rb.boatId === realId);
+          if (auth && swapped && race.id > 0) {
+            queueUpdate(`race-boat-${race.id}-${realId}`, { kind: "syncRaceBoat", raceId: race.id, entry: swapped });
+          }
+          return { ...race, info: { ...race.info, boats: updatedBoats } };
+        })
+      );
+    }
+    pendingCreatesRef.current.delete(tempId);
+    touchQueue();
+  }, [auth, queueUpdate, touchQueue]);
+
+  // A temp race's real ID has arrived — adopt it (keeping all local edits made
+  // since creation was first attempted), re-point the parent series, re-point any
+  // still-pending boat creates that were tracked against the temp ID, and sync
+  // every boat currently in this race (those syncs were skipped while the race ID
+  // was temp, since a temp race ID can't be written to race_boats either).
+  const resolveRace = useCallback((tempId: number, created: Race, seriesId: number | null) => {
+    setRaces((prev) => prev.map((r) => {
+      if (r.id !== tempId) return r;
+      const localBoats = (r.info.boats || []) as RaceBoatEntry[];
+      localBoats.forEach((b) => {
+        if (auth && b.boatId > 0) {
+          queueUpdate(`race-boat-${created.id}-${b.boatId}`, { kind: "syncRaceBoat", raceId: created.id, entry: b });
+        }
+      });
+      return { ...r, id: created.id };
+    }));
+
+    setSelectedRaceId((prev) => (prev === tempId ? created.id : prev));
+
+    pendingCreatesRef.current.forEach((spec) => {
+      if (spec.kind === "boat") {
+        const idx = spec.raceIds.indexOf(tempId);
+        if (idx !== -1) spec.raceIds[idx] = created.id;
+      }
+    });
+
+    if (seriesId != null) {
+      setSeries((prev) => prev.map((s) => {
+        if (s.id !== seriesId) return s;
+        const updatedInfo = { ...s.info, raceIds: s.info.raceIds.map((id) => (id === tempId ? created.id : id)) };
+        if (auth) queueUpdate(`series-${s.id}`, { kind: "updateSeries", seriesId: s.id, name: s.name, info: updatedInfo });
+        return { ...s, info: updatedInfo };
+      }));
+    }
+
+    pendingCreatesRef.current.delete(tempId);
+    touchQueue();
+  }, [auth, queueUpdate, touchQueue]);
+
+  // A temp series' real ID has arrived — races don't store their parent series ID
+  // directly (only the reverse pointer, series.info.raceIds), so the only other
+  // thing that can reference it is a still-pending race create's `seriesId`.
+  const resolveSeries = useCallback((tempId: number, realId: number) => {
+    setSeries((prev) => prev.map((s) => (s.id === tempId ? { ...s, id: realId } : s)));
+    pendingCreatesRef.current.forEach((spec) => {
+      if (spec.kind === "race" && spec.seriesId === tempId) {
+        spec.seriesId = realId;
+      }
+    });
+    pendingCreatesRef.current.delete(tempId);
+    touchQueue();
+  }, [touchQueue]);
+
+  const RETRY_INTERVAL_MS = 5000;
+
+  const retryPendingCreates = useCallback(async () => {
+    retryTimerRef.current = null;
+    if (!auth || pendingCreatesRef.current.size === 0) return;
+
+    const entries = Array.from(pendingCreatesRef.current.entries());
+    for (const [tempId, spec] of entries) {
+      try {
+        if (spec.kind === "boat") {
+          const res = await addBoat(auth, spec.name, spec.info);
+          resolveBoat(tempId, parseRecord<BoatInfo>(res.boat[0]).id);
+        } else if (spec.kind === "race") {
+          const res = await addRace(auth, spec.name, spec.info);
+          resolveRace(tempId, parseRecord<RaceInfo>(res.race[0]), spec.seriesId);
+        } else {
+          const res = await addSeries(auth, spec.name, spec.info);
+          resolveSeries(tempId, parseRecord<SeriesInfo>(res.series[0]).id);
+        }
+      } catch {
+        // Still offline or failed — leave it queued, try again next cycle
+      }
+    }
+
+    if (pendingCreatesRef.current.size > 0) {
+      retryTimerRef.current = setTimeout(() => retryPendingCreates(), RETRY_INTERVAL_MS);
+    } else if (pendingUpdates.current.size === 0) {
+      setSynced(true);
+    }
+  }, [auth, resolveBoat, resolveRace, resolveSeries]);
+
+  // Track which race a temp boat gets added to, so resolveBoat can sync it there
+  // once the boat's real ID arrives.
+  const trackTempBoatInRace = useCallback((tempId: number, raceId: number) => {
+    const entry = pendingCreatesRef.current.get(tempId);
+    if (entry && entry.kind === "boat" && !entry.raceIds.includes(raceId)) {
+      entry.raceIds.push(raceId);
+    }
+  }, []);
+
+  const createSeries = useCallback(async (name: string, info?: Partial<SeriesInfo>): Promise<Series> => {
+    const seriesInfo: SeriesInfo = { name, raceIds: [], ...info };
+    const tempId = generateTempId();
+    const optimistic: Series = { id: tempId, name, info: seriesInfo };
+    setSeries((prev) => [...prev, optimistic]);
+    pendingCreatesRef.current.set(tempId, { kind: "series", name, info: seriesInfo });
+    touchQueue();
+    setSynced(false);
+    if (auth && !retryTimerRef.current) {
+      retryTimerRef.current = setTimeout(() => retryPendingCreates(), 0);
+    }
+    return optimistic;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth, touchQueue]);
+
+  const createRace = useCallback(async (
     name: string,
     seriesId: number | null,
     info?: Partial<RaceInfo>
   ): Promise<Race> => {
-    if (!auth) throw new Error("Not authenticated");
     const raceInfo: RaceInfo = { name, boats: [], starts: [], ...info };
-    // Optimistic: add to local state with temp ID immediately
-    const tempId = -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
+    const tempId = generateTempId();
     const optimistic: Race = { id: tempId, name, info: raceInfo };
     setRaces((prev) => [...prev, optimistic]);
     setSelectedRaceId(tempId);
 
-    // If creating inside a series, optimistically add to series
+    let effectiveSeriesId = seriesId;
     if (seriesId !== null) {
       setSeries((prev) =>
         prev.map((s) => {
@@ -344,184 +630,43 @@ export function RaceProvider({ children }: { children: ReactNode }) {
           return { ...s, info: { ...s.info, raceIds: [...s.info.raceIds, tempId] } };
         })
       );
-    }
-
-    // Create on server, then swap temp ID with real ID
-    try {
-      const res = await addRace(auth, name, raceInfo);
-      const created = parseRecord<RaceInfo>(res.race[0]);
-
-      // Boats may have been checked in locally while the race still had its temp ID —
-      // those addRaceBoat calls were skipped (see addBoatToRace). Preserve them instead
-      // of dropping them when swapping in `created`, and re-send them now that we have
-      // a real race ID.
-      setRaces((prev) => prev.map((r) => {
-        if (r.id !== tempId) return r;
-        const localBoats = (r.info.boats || []) as RaceBoatEntry[];
-        localBoats.forEach((b) => {
-          if (auth && b.boatId > 0) addRaceBoat(auth, created.id, b).catch((e) => console.error("addRaceBoat failed (post-create resync)", e));
-        });
-        return { ...created, info: { ...created.info, boats: localBoats } };
-      }));
-      setSelectedRaceId(created.id);
-
-      // Boats still waiting on their own real ID (see pendingBoatsRef) were tracked
-      // against this race's temp ID — repoint them so swapBoatId can still link them
-      // to the race once they resolve.
-      pendingBoatsRef.current.forEach((entry) => {
-        const idx = entry.raceIds.indexOf(tempId);
-        if (idx !== -1) entry.raceIds[idx] = created.id;
-      });
-
-      // Swap temp ID in parent series
-      if (seriesId !== null) {
-        setSeries((prev) =>
-          prev.map((s) => {
-            if (s.id !== seriesId) return s;
-            const updated = {
-              ...s,
-              info: { ...s.info, raceIds: s.info.raceIds.map((id) => id === tempId ? created.id : id) },
-            };
-            queueUpdate(`series-${s.id}`, () =>
-              updateSeries(auth, s.id, s.name, updated.info)
-            );
-            return updated;
-          })
-        );
-      } else {
-        // Create a placeholder series
-        const seriesName = `${name} Series`;
-        const placeholder = await createSeries(seriesName, { raceIds: [created.id] });
-        setSeries((prev) =>
-          prev.map((s) => (s.id === placeholder.id ? { ...s, info: { ...s.info, raceIds: [created.id] } } : s))
-        );
-      }
-
-      return created;
-    } catch {
-      // Remove optimistic entries on failure
-      setRaces((prev) => prev.filter((r) => r.id !== tempId));
-      if (seriesId !== null) {
-        setSeries((prev) =>
-          prev.map((s) => {
-            if (s.id !== seriesId) return s;
-            return { ...s, info: { ...s.info, raceIds: s.info.raceIds.filter((id) => id !== tempId) } };
-          })
-        );
-      }
-      setSelectedRaceId(null);
-      throw new Error("Failed to create race");
-    }
-  };
-
-  const generateTempId = (): number => {
-    // Large negative number to avoid collision with real DB IDs
-    return -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
-  };
-
-  const swapBoatId = useCallback((tempId: number, realId: number) => {
-    // 1. Swap in boats array
-    setBoats((prev) =>
-      prev.map((b) => (b.id === tempId ? { ...b, id: realId } : b))
-    );
-
-    // 2. Swap in tracked races and call addRaceBoat for each
-    const pending = pendingBoatsRef.current.get(tempId);
-    if (pending) {
-      setRaces((prevRaces) =>
-        prevRaces.map((race) => {
-          if (!pending.raceIds.includes(race.id)) return race;
-          const updatedBoats = (race.info.boats || []).map((rb) =>
-            rb.boatId === tempId ? { ...rb, boatId: realId } : rb
-          );
-          const swappedEntry = updatedBoats.find((rb) => rb.boatId === realId);
-          if (auth && swappedEntry) {
-            addRaceBoat(auth, race.id, swappedEntry).catch((e) => console.error("addRaceBoat failed (boat ID swap)", e));
-          }
-          return { ...race, info: { ...race.info, boats: updatedBoats } };
-        })
-      );
-      pendingBoatsRef.current.delete(tempId);
-    }
-  }, [auth]);
-
-  const retryPendingBoats = useCallback(async () => {
-    if (!auth || pendingBoatsRef.current.size === 0) return;
-
-    const entries = Array.from(pendingBoatsRef.current.entries());
-    for (const [tempId, { name, info }] of entries) {
-      try {
-        const res = await addBoat(auth, name, info);
-        const created = parseRecord<BoatInfo>(res.boat[0]);
-        swapBoatId(tempId, created.id);
-      } catch {
-        // Still offline, will retry next cycle
-      }
-    }
-
-    // Schedule another retry if there are still pending boats
-    if (pendingBoatsRef.current.size > 0) {
-      retryTimerRef.current = setTimeout(retryPendingBoats, 10000);
     } else {
-      setSynced(pendingUpdates.current.size === 0);
-    }
-  }, [auth, swapBoatId]);
-
-  // Track which race a temp boat gets added to
-  const trackTempBoatInRace = useCallback((tempId: number, raceId: number) => {
-    const entry = pendingBoatsRef.current.get(tempId);
-    if (entry && !entry.raceIds.includes(raceId)) {
-      entry.raceIds.push(raceId);
-    }
-  }, []);
-
-  const CREATE_TIMEOUT_MS = 5000;
-
-  const createBoat = async (name: string, info: BoatInfo): Promise<Boat> => {
-    if (!auth) {
-      // No auth — create temp boat only
-      const tempId = generateTempId();
-      const tempBoat: Boat = { id: tempId, name, info };
-      setBoats((prev) => [...prev, tempBoat]);
-      pendingBoatsRef.current.set(tempId, { name, info, raceIds: [] });
-      setSynced(false);
-      return tempBoat;
+      // Standalone race — also create a placeholder series to hold it, same as before
+      const placeholderName = `${name} Series`;
+      const placeholder = await createSeries(placeholderName, { raceIds: [tempId] });
+      effectiveSeriesId = placeholder.id;
     }
 
-    // Try to create with timeout
-    try {
-      const result = await Promise.race([
-        addBoat(auth, name, info),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), CREATE_TIMEOUT_MS)
-        ),
-      ]);
-      const created = parseRecord<BoatInfo>(result.boat[0]);
-      setBoats((prev) => [...prev, created]);
-      return created;
-    } catch {
-      // Failed or timed out — use temp ID
-      const tempId = generateTempId();
-      const tempBoat: Boat = { id: tempId, name, info };
-      setBoats((prev) => [...prev, tempBoat]);
-      pendingBoatsRef.current.set(tempId, { name, info, raceIds: [] });
-      setSynced(false);
-
-      // Start retry cycle if not already running
-      if (!retryTimerRef.current) {
-        retryTimerRef.current = setTimeout(retryPendingBoats, 10000);
-      }
-
-      return tempBoat;
+    pendingCreatesRef.current.set(tempId, { kind: "race", name, seriesId: effectiveSeriesId, info: raceInfo });
+    touchQueue();
+    setSynced(false);
+    if (auth && !retryTimerRef.current) {
+      retryTimerRef.current = setTimeout(() => retryPendingCreates(), 0);
     }
-  };
+    return optimistic;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth, touchQueue, createSeries]);
+
+  const createBoat = useCallback(async (name: string, info: BoatInfo): Promise<Boat> => {
+    const tempId = generateTempId();
+    const tempBoat: Boat = { id: tempId, name, info };
+    setBoats((prev) => [...prev, tempBoat]);
+    pendingCreatesRef.current.set(tempId, { kind: "boat", name, info, raceIds: [] });
+    touchQueue();
+    setSynced(false);
+    if (auth && !retryTimerRef.current) {
+      retryTimerRef.current = setTimeout(() => retryPendingCreates(), 0);
+    }
+    return tempBoat;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth, touchQueue]);
 
   const updateBoatData = (boatId: number, name: string, info: BoatInfo) => {
     setBoats((prev) =>
       prev.map((b) => (b.id === boatId ? { ...b, name, info } : b))
     );
     if (auth) {
-      queueUpdate(`boat-${boatId}`, () => updateBoat(auth, boatId, name, info));
+      queueUpdate(`boat-${boatId}`, { kind: "updateBoat", boatId, name, info });
     }
   };
 
@@ -531,7 +676,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     );
     if (auth) {
       const { boats: _boats, ...infoWithoutBoats } = info;
-      queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, name, infoWithoutBoats as RaceInfo));
+      queueUpdate(`race-${raceId}`, { kind: "updateRace", raceId, name, info: infoWithoutBoats as RaceInfo });
     }
   };
 
@@ -540,7 +685,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       prev.map((s) => (s.id === seriesId ? { ...s, name, info } : s))
     );
     if (auth) {
-      queueUpdate(`series-${seriesId}`, () => updateSeries(auth, seriesId, name, info));
+      queueUpdate(`series-${seriesId}`, { kind: "updateSeries", seriesId, name, info });
     }
   };
 
@@ -552,7 +697,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       const merged = { ...race.info, ...patch };
       if (auth) {
         const { boats: _boats, ...mergedWithoutBoats } = merged;
-        queueUpdate(`race-${raceId}`, () => updateRace(auth, raceId, race.name, mergedWithoutBoats as RaceInfo));
+        queueUpdate(`race-${raceId}`, { kind: "updateRace", raceId, name: race.name, info: mergedWithoutBoats as RaceInfo });
       }
       return prev.map((r) => r.id === raceId ? { ...r, info: merged } : r);
     });
@@ -564,7 +709,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       if (!s) return prev;
       const merged = { ...s.info, ...patch };
       if (auth) {
-        queueUpdate(`series-${seriesId}`, () => updateSeries(auth, seriesId, s.name, merged));
+        queueUpdate(`series-${seriesId}`, { kind: "updateSeries", seriesId, name: s.name, info: merged });
       }
       return prev.map((s) => s.id === seriesId ? { ...s, info: merged } : s);
     });
@@ -578,8 +723,11 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       const currentBoats = (race.info.boats || []) as RaceBoatEntry[];
       const updatedBoats = currentBoats.map((b) => b.boatId === boatId ? updater(b) : b);
       const updatedEntry = updatedBoats.find((b) => b.boatId === boatId);
-      if (auth && boatId > 0 && updatedEntry) {
-        queueUpdate(`race-boat-${raceId}-${boatId}`, () => updateRaceBoat(auth, raceId, updatedEntry));
+      // Races also carry a temp negative ID until the server confirms creation;
+      // race_id is a Postgres integer column, so a temp ID here would fail on sync.
+      // Skip until resolveRace re-sends this boat's current state with the real ID.
+      if (auth && boatId > 0 && raceId > 0 && updatedEntry) {
+        queueUpdate(`race-boat-${raceId}-${boatId}`, { kind: "syncRaceBoat", raceId, entry: updatedEntry });
       }
       return prev.map((r) => r.id === raceId ? { ...r, info: { ...race.info, boats: updatedBoats } } : r);
     });
@@ -591,12 +739,14 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       const race = prev.find((r) => r.id === raceId);
       if (!race) return prev;
       const updatedBoats = ((race.info.boats || []) as RaceBoatEntry[]).filter((b) => b.boatId !== boatId);
-      if (auth && boatId > 0) {
-        deleteRaceBoat(auth, raceId, boatId).catch(() => {});
+      if (auth && boatId > 0 && raceId > 0) {
+        // Same key as updateBoatInRace/addBoatToRace, so a pending edit to this boat
+        // is superseded by the delete rather than resurrecting it afterward.
+        queueUpdate(`race-boat-${raceId}-${boatId}`, { kind: "deleteRaceBoat", raceId, boatId });
       }
       return prev.map((r) => r.id === raceId ? { ...r, info: { ...race.info, boats: updatedBoats } } : r);
     });
-  }, [auth]);
+  }, [auth, queueUpdate]);
 
   // Atomically append a boat entry to a race — safe to call from async .then() handlers
   const addBoatToRace = useCallback((raceId: number, entry: RaceBoatEntry) => {
@@ -608,16 +758,12 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       if (!race) return prev;
       const currentBoats = (race.info.boats || []) as RaceBoatEntry[];
       if (currentBoats.some((b) => b.boatId === entry.boatId)) return prev;
-      // Fire-and-forget for real IDs — server handles concurrent inserts via ON CONFLICT DO NOTHING.
-      // Races also carry a temp negative ID until the server confirms creation; race_id is a
-      // Postgres integer column, so a temp ID here would silently fail on insert. Skip until
-      // the race swap (in createRace) re-sends this boat with the real ID.
       if (auth && entry.boatId > 0 && raceId > 0) {
-        addRaceBoat(auth, raceId, entry).catch((e) => console.error("addRaceBoat failed", e));
+        queueUpdate(`race-boat-${raceId}-${entry.boatId}`, { kind: "syncRaceBoat", raceId, entry });
       }
       return prev.map((r) => r.id === raceId ? { ...r, info: { ...race.info, boats: [...currentBoats, entry] } } : r);
     });
-  }, [auth, trackTempBoatInRace]);
+  }, [auth, trackTempBoatInRace, queueUpdate]);
 
   // Soft delete a boat (marks as deleted, keeps record for historical races)
   const softDeleteBoat = (boatId: number) => {
@@ -626,7 +772,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         if (b.id !== boatId) return b;
         const updatedInfo = { ...b.info, deleted: true };
         if (auth) {
-          queueUpdate(`boat-${boatId}`, () => updateBoat(auth, boatId, b.name, updatedInfo));
+          queueUpdate(`boat-${boatId}`, { kind: "updateBoat", boatId, name: b.name, info: updatedInfo });
         }
         return { ...b, info: updatedInfo };
       })
@@ -634,64 +780,57 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   };
 
   // Delete a race from the database and remove from its parent series
-  const removeRace = async (raceId: number) => {
-    // Remove from parent series
+  const removeRace = useCallback(async (raceId: number) => {
     setSeries((prev) =>
       prev.map((s) => {
         if (!s.info.raceIds.includes(raceId)) return s;
         const updatedInfo = { ...s.info, raceIds: s.info.raceIds.filter((id) => id !== raceId) };
         if (auth) {
-          queueUpdate(`series-${s.id}`, () => updateSeries(auth, s.id, s.name, updatedInfo));
+          queueUpdate(`series-${s.id}`, { kind: "updateSeries", seriesId: s.id, name: s.name, info: updatedInfo });
         }
         return { ...s, info: updatedInfo };
       })
     );
 
-    // Remove from local state
     setRaces((prev) => prev.filter((r) => r.id !== raceId));
-
-    // Deselect if this was the selected race
     setSelectedRaceId((prev) => (prev === raceId ? null : prev));
 
-    // Delete from database
-    if (auth) {
-      try {
-        await deleteRace(auth, raceId);
-      } catch {
-        // If delete fails, data will be re-synced on next refresh
-      }
+    if (raceId < 0) {
+      // Never reached the server — nothing to delete remotely
+      pendingCreatesRef.current.delete(raceId);
+      touchQueue();
+    } else if (auth) {
+      queueUpdate(`race-${raceId}`, { kind: "deleteRace", raceId });
     }
-  };
+  }, [auth, queueUpdate, touchQueue]);
 
   // Delete a series and all its races
-  const removeSeries = async (seriesId: number) => {
+  const removeSeries = useCallback(async (seriesId: number) => {
     const s = series.find((s) => s.id === seriesId);
     const raceIdsToDelete = s?.info.raceIds || [];
 
-    // Deselect if current race is in this series
     setSelectedRaceId((prev) => {
       if (prev != null && raceIdsToDelete.includes(prev)) return null;
       return prev;
     });
 
-    // Remove races from local state
     setRaces((prev) => prev.filter((r) => !raceIdsToDelete.includes(r.id)));
-
-    // Remove series from local state
     setSeries((prev) => prev.filter((s) => s.id !== seriesId));
 
-    // Delete from database
-    if (auth) {
-      try {
-        for (const raceId of raceIdsToDelete) {
-          await deleteRace(auth, raceId);
-        }
-        await deleteSeries(auth, seriesId);
-      } catch {
-        // If deletes fail, will be cleaned up on refresh
+    raceIdsToDelete.forEach((raceId) => {
+      if (raceId < 0) {
+        pendingCreatesRef.current.delete(raceId);
+      } else if (auth) {
+        queueUpdate(`race-${raceId}`, { kind: "deleteRace", raceId });
       }
+    });
+    if (seriesId < 0) {
+      pendingCreatesRef.current.delete(seriesId);
+    } else if (auth) {
+      queueUpdate(`series-${seriesId}`, { kind: "deleteSeries", seriesId });
     }
-  };
+    touchQueue();
+  }, [series, auth, queueUpdate, touchQueue]);
 
   return (
     <RaceContext.Provider

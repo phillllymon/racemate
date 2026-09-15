@@ -521,6 +521,17 @@ export async function leaveClub(
   });
 }
 
+export async function deleteClub(
+  auth: AuthParams,
+  clubId: number
+): Promise<{ message: string }> {
+  return post("deleteClub", {
+    userId: auth.userId,
+    token: auth.token,
+    clubId,
+  });
+}
+
 // ---- Assistant races ----
 
 export async function getAssistantRaces(

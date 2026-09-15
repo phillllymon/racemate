@@ -120,7 +120,7 @@ function EditBoatForm({
   raceEntry: RaceBoatEntry;
   onDone: () => void;
 }) {
-  const { updateRaceData, updateBoatData, races, softDeleteBoat } = useRaces();
+  const { updateBoatData, updateBoatInRace, races, softDeleteBoat } = useRaces();
   const race = races.find((r) => r.id === raceId)!;
   const [confirmDelete, setConfirmDelete] = useState(false);;
 
@@ -146,12 +146,10 @@ function EditBoatForm({
   );
 
   const save = () => {
-    // Update the boat's class in the race entry
-    const updatedBoats = (race.info.boats || []).map((b) => {
-      if (b.boatId !== boat.id) return b;
-      return { ...b, class: boatClass.trim() || raceEntry.class };
-    });
-    updateRaceData(raceId, race.name, { ...race.info, boats: updatedBoats });
+    // Update the boat's class in the race entry. updateBoatInRace (not updateRaceData)
+    // so this actually syncs to race_boats — updateRaceData strips `boats` before
+    // persisting, since boats live in a separate table.
+    updateBoatInRace(raceId, boat.id, (b) => ({ ...b, class: boatClass.trim() || raceEntry.class }));
 
     // Update the boat record in the database
     const updatedInfo: BoatInfo = {
@@ -299,7 +297,7 @@ function CreateRaceForm({
   previousRace: Race | null;
   onDone: () => void;
 }) {
-  const { createRace } = useRaces();
+  const { createRace, addBoatToRace, series } = useRaces();
   const { now } = useTime();
   const [name, setName] = useState("");
   const [autoCheckIn, setAutoCheckIn] = useState(true);
@@ -309,26 +307,38 @@ function CreateRaceForm({
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const parentSeries = series.find((s) => s.id === seriesId) || null;
+  const seriesAssistants = parentSeries?.info.assistants || [];
+  const [useCustomAssistants, setUseCustomAssistants] = useState(false);
+  const [assistants, setAssistants] = useState<string[]>([]);
+
   const submit = async () => {
     if (!name.trim()) return;
     setBusy(true);
+
+    const effectiveAssistants = useCustomAssistants ? assistants : seriesAssistants;
 
     const raceInfo: Partial<RaceInfo> = {
       autoCheckIn,
       windCondition,
       courseLength: courseLength.trim() ? Number(courseLength) : undefined,
       notes: notes.trim() || undefined,
+      assistants: effectiveAssistants.length > 0 ? effectiveAssistants : undefined,
+      customAssistants: useCustomAssistants || undefined,
     };
 
+    // Boats are added after creation via addBoatToRace (not folded into raceInfo) —
+    // boats live in the separate race_boats table, so anything under `boats` here
+    // would only ever land in the race's local info blob and never actually persist.
+    let prevBoats: RaceBoatEntry[] = [];
     if (copyPrevious && previousRace) {
-      const prevBoats = (previousRace.info.boats || []).map((b) => ({
+      prevBoats = (previousRace.info.boats || []).map((b) => ({
         ...b,
         finishTime: null,
         lapsCompleted: 0,
         lapTimes: [],
         status: autoCheckIn ? "checked-in" : "signed-up",
       }));
-      raceInfo.boats = prevBoats;
 
       if (previousRace.info.classLaps) {
         raceInfo.classLaps = previousRace.info.classLaps;
@@ -362,7 +372,8 @@ function CreateRaceForm({
       }
     }
 
-    await createRace(name.trim(), seriesId, raceInfo);
+    const created = await createRace(name.trim(), seriesId, raceInfo);
+    prevBoats.forEach((entry) => addBoatToRace(created.id, entry));
     setName("");
     setBusy(false);
     onDone();
@@ -425,6 +436,15 @@ function CreateRaceForm({
           <span>Copy boats, classes &amp; starts from {previousRace.name}</span>
         </label>
       )}
+
+      <AssistantPicker
+        assistants={assistants}
+        onChange={setAssistants}
+        seriesAssistants={parentSeries ? seriesAssistants : undefined}
+        useCustom={useCustomAssistants}
+        onToggleCustom={setUseCustomAssistants}
+      />
+
       <div className="races-form-actions">
         <button className="btn btn-primary" onClick={submit} disabled={busy || !name.trim()}>
           {busy ? "..." : "Create Race"}
@@ -627,7 +647,7 @@ function ClassSection({
   boats: Boat[];
   onEditBoat: (boatId: number) => void;
 }) {
-  const { updateRaceData } = useRaces();
+  const { updateRaceData, removeBoatFromRace, updateBoatInRace } = useRaces();
   const [expanded, setExpanded] = useState(true);
   const [addingBoat, setAddingBoat] = useState(false);
 
@@ -637,40 +657,39 @@ function ClassSection({
   const setLaps = (newLaps: number) => {
     const targetLaps = Math.max(1, newLaps);
     const updatedClassLaps = { ...classLaps, [className]: targetLaps };
+    updateRaceData(raceId, race.name, {
+      ...race.info,
+      classLaps: updatedClassLaps,
+    });
 
-    // Check if any boats in this class have already completed the new required laps
-    const updatedBoats = (race.info.boats || []).map((b) => {
-      if (b.class !== className) return b;
+    // Auto-finish/un-finish affected boats, synced individually via updateBoatInRace
+    // (not folded into the updateRaceData call above, which strips `boats` before
+    // persisting — boats live in the separate race_boats table).
+    (race.info.boats || []).forEach((b) => {
+      if (b.class !== className) return;
       const completed = (b.lapsCompleted as number) || 0;
       const lapTimesArr = (b.lapTimes as number[]) || [];
 
       if (completed >= targetLaps && b.status === "racing") {
         // Boat has already done enough laps — finish them with their lap time
         const finishTime = targetLaps <= lapTimesArr.length ? lapTimesArr[targetLaps - 1] : null;
-        return { ...b, finishTime, lapsCompleted: completed, status: finishTime != null ? "finished" : b.status };
-      }
-      if (completed < targetLaps && b.status === "finished" && b.finishTime != null) {
+        if (finishTime != null) {
+          updateBoatInRace(raceId, b.boatId, (rb) => ({ ...rb, finishTime, status: "finished" }));
+        }
+      } else if (completed < targetLaps && b.status === "finished" && b.finishTime != null) {
         // Laps increased and boat was finished — put back to racing if they haven't done enough
-        return { ...b, finishTime: null, status: "racing" };
+        updateBoatInRace(raceId, b.boatId, (rb) => ({ ...rb, finishTime: null, status: "racing" }));
       }
-      return b;
-    });
-
-    updateRaceData(raceId, race.name, {
-      ...race.info,
-      classLaps: updatedClassLaps,
-      boats: updatedBoats,
     });
   };
 
   const getBoat = (boatId: number) => boats.find((b) => b.id === boatId);
 
   const removeBoat = (boatId: number) => {
-    const raceBoats = race.info.boats || [];
-    updateRaceData(raceId, race.name, {
-      ...race.info,
-      boats: raceBoats.filter((b) => b.boatId !== boatId),
-    });
+    // Use removeBoatFromRace, not updateRaceData — updateRaceData strips `boats`
+    // before syncing to the server (boats live in the separate race_boats table),
+    // so a delete through it never actually persisted and reappeared on refresh.
+    removeBoatFromRace(raceId, boatId);
   };
 
   return (

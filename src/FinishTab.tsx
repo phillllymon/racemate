@@ -74,12 +74,15 @@ function SearchResults({
   hideCertified,
   finishTimeDisplay,
   starts,
+  classLaps,
+  now,
   myObservations,
   allObservations,
   onStage,
   onAdjustFinish,
   onUnfinish,
   onSetStatus,
+  onUndoLap,
 }: {
   query: string;
   boats: Boat[];
@@ -89,15 +92,24 @@ function SearchResults({
   hideCertified: boolean;
   finishTimeDisplay: FinishTimeDisplay;
   starts: StartInfo[];
+  classLaps: Record<string, number>;
+  now: number;
   myObservations: FinishObservation[];
   allObservations: FinishObservation[];
   onStage: (boatId: number) => void;
   onAdjustFinish: (boatId: number, delta: number) => void;
   onUnfinish: (boatId: number) => void;
   onSetStatus: (boatId: number, status: string) => void;
+  onUndoLap: (boatId: number) => void;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
+  const [preStartConfirmId, setPreStartConfirmId] = useState<number | null>(null);
+
+  const hasClassStarted = (className: string) => {
+    const start = starts.find((s) => s.classes.includes(className));
+    return start?.startTime != null && start.startTime <= now;
+  };
 
   const myObsBoatIds = new Set(myObservations.map((o) => o.boat_id));
   const allObsByBoat = new Map<number, FinishObservation[]>();
@@ -166,7 +178,11 @@ function SearchResults({
                     setEditingId(isEditing ? null : rb.boatId);
                     setMenuOpenId(null);
                   } else if (!alreadyStaged) {
-                    onStage(rb.boatId);
+                    if (!hasClassStarted(rb.class)) {
+                      setPreStartConfirmId(rb.boatId);
+                    } else {
+                      onStage(rb.boatId);
+                    }
                   }
                 }}
               >
@@ -198,9 +214,41 @@ function SearchResults({
               </button>
             </div>
 
+            {/* Warn before staging a boat whose class hasn't started yet */}
+            {preStartConfirmId === rb.boatId && (
+              <div className="finish-edit-row finish-prestart-warning">
+                <span className="finish-prestart-warning-text">
+                  {rb.class} hasn't started yet — stage anyway?
+                </span>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => { onStage(rb.boatId); setPreStartConfirmId(null); }}
+                >
+                  Stage Anyway
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setPreStartConfirmId(null)}>
+                  Cancel
+                </button>
+              </div>
+            )}
+
             {/* Status dropdown menu */}
             {showMenu && (
               <div className="finish-status-menu">
+                {(classLaps[rb.class] || 1) > 1 && (
+                  <>
+                    <div className="finish-status-menu-lapinfo">
+                      Lap {(rb.lapsCompleted as number) || 0} / {classLaps[rb.class] || 1}
+                    </div>
+                    <button
+                      className="finish-status-menu-item"
+                      disabled={!((rb.lapsCompleted as number) > 0)}
+                      onClick={() => { onUndoLap(rb.boatId); setMenuOpenId(null); }}
+                    >
+                      Undo Last Lap
+                    </button>
+                  </>
+                )}
                 {rb.status !== "racing" && (
                   <button className="finish-status-menu-item" onClick={() => { onSetStatus(rb.boatId, "racing"); setMenuOpenId(null); }}>
                     Racing
@@ -625,12 +673,13 @@ function CertifyModal({
 // ---- Main FinishTab ----
 
 export default function FinishTab() {
-  const { selectedRace, updateBoatInRace, boats } = useRaces();
+  const { selectedRace, updateBoatInRace, patchRaceInfo, boats } = useRaces();
   const { user, token } = useAuth();
   const auth = user && token ? { userId: user.id, token } : null;
   const { now } = useTime();
 
   const [search, setSearch] = useState("");
+  const [lapsPanelOpen, setLapsPanelOpen] = useState(false);
   const [hideFinishedByMe, setHideFinishedByMe] = useState(false);
   const [hideCertified, setHideCertified] = useState(false);
   const [finishTimeDisplay, setFinishTimeDisplay] = useState<FinishTimeDisplay>(
@@ -718,6 +767,31 @@ export default function FinishTab() {
   const raceBoats = selectedRace.info.boats || [];
   const classLaps = (selectedRace.info.classLaps || {}) as Record<string, number>;
   const classFinishPreviewEnabled = !!selectedRace.info.classFinishPreview;
+  const persistedEmptyClasses = (selectedRace.info.emptyClasses as string[] | undefined) || [];
+  const allRaceClasses = Array.from(new Set([...persistedEmptyClasses, ...raceBoats.map((b) => b.class)]));
+
+  // Lets the RC cut a race short (e.g. 2 laps -> 1) mid-race without leaving the
+  // Finish tab — same logic as the class-laps stepper in the Races tab, just
+  // surfaced here too since that's non-obvious to find while actively finishing boats.
+  const setClassLaps = (className: string, newLaps: number) => {
+    const targetLaps = Math.max(1, newLaps);
+    patchRaceInfo(selectedRace.id, { classLaps: { ...classLaps, [className]: targetLaps } });
+
+    raceBoats.forEach((b) => {
+      if (b.class !== className) return;
+      const completed = (b.lapsCompleted as number) || 0;
+      const lapTimesArr = (b.lapTimes as number[]) || [];
+
+      if (completed >= targetLaps && b.status === "racing") {
+        const finishTime = targetLaps <= lapTimesArr.length ? lapTimesArr[targetLaps - 1] : null;
+        if (finishTime != null) {
+          updateBoatInRace(selectedRace.id, b.boatId, (rb) => ({ ...rb, finishTime, status: "finished" }));
+        }
+      } else if (completed < targetLaps && b.status === "finished" && b.finishTime != null) {
+        updateBoatInRace(selectedRace.id, b.boatId, (rb) => ({ ...rb, finishTime: null, status: "racing" }));
+      }
+    });
+  };
 
   const getClassPlace = (index: number): number | null => {
     if (!classFinishPreviewEnabled) return null;
@@ -899,6 +973,31 @@ export default function FinishTab() {
     }
   };
 
+  const undoLap = (boatId: number) => {
+    const { lapsCompleted, lapTimes } = getBoatLapInfo(boatId);
+    if (lapsCompleted <= 0) return;
+    const newLapsCompleted = lapsCompleted - 1;
+    const newLapTimes = lapTimes.slice(0, -1);
+
+    // If the last lap had completed the race, undoing it must also un-finish the
+    // boat — mirrors the same revert RacesTab's lap-count stepper does.
+    const rb = raceBoats.find((b) => b.boatId === boatId);
+    const wasFinished = rb?.status === "finished" && rb.finishTime != null;
+    if (wasFinished) {
+      const myObs = myObservations.find((o) => o.boat_id === boatId);
+      if (myObs && auth) {
+        deleteFinishObservation(auth, myObs.id);
+        setMyObservations((prev) => prev.filter((o) => o.boat_id !== boatId));
+      }
+    }
+    updateBoatInRace(selectedRace.id, boatId, (b) => ({
+      ...b,
+      lapsCompleted: newLapsCompleted,
+      lapTimes: newLapTimes,
+      ...(wasFinished ? { status: "racing", finishTime: null } : {}),
+    }));
+  };
+
   const saveFinishTime = (boatId: number, time: number | null) => {
     if (!auth) return;
     if (time != null) {
@@ -953,6 +1052,34 @@ export default function FinishTab() {
       <button className="btn finish-mark-btn" onClick={markUnknown}>
         MARK
       </button>
+
+      {/* Laps — lets the RC cut a race short (or extend it) mid-race */}
+      {allRaceClasses.length > 0 && (
+        <div className="finish-staging">
+          <button className="finish-staging-header" onClick={() => setLapsPanelOpen(!lapsPanelOpen)}>
+            <span className="finish-staging-title">Laps</span>
+            <span className={`race-card-chevron ${lapsPanelOpen ? "race-card-chevron--open" : ""}`}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 6 15 12 9 18" />
+              </svg>
+            </span>
+          </button>
+          {lapsPanelOpen && (
+            <div className="finish-staging-list">
+              {allRaceClasses.map((cls) => (
+                <div key={cls} className="class-laps-row">
+                  <span className="start-time-label">{cls}:</span>
+                  <div className="results-factor-controls">
+                    <button className="staged-time-adj" onClick={() => setClassLaps(cls, (classLaps[cls] || 1) - 1)}>−</button>
+                    <span className="results-factor-value">{classLaps[cls] || 1}</span>
+                    <button className="staged-time-adj" onClick={() => setClassLaps(cls, (classLaps[cls] || 1) + 1)}>+</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Staging area */}
       <div className="finish-staging">
@@ -1018,9 +1145,12 @@ export default function FinishTab() {
         hideCertified={hideCertified}
         finishTimeDisplay={finishTimeDisplay}
         starts={selectedRace.info.starts || []}
+        classLaps={classLaps}
+        now={now}
         myObservations={myObservations}
         allObservations={allObservations}
         onStage={stageBoat}
+        onUndoLap={undoLap}
         onAdjustFinish={(boatId, delta) => {
           const myObs = myObservations.find((o) => o.boat_id === boatId);
           if (myObs) {

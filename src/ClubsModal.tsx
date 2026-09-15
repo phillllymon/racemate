@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useAuth } from "./AuthContext";
 import { useDataSync } from "./useDataSync";
 import {
-  createClub, getAllClubs, getMyClubs, getClubMembers, joinClub, leaveClub,
+  createClub, getAllClubs, getMyClubs, getClubMembers, joinClub, leaveClub, deleteClub,
 } from "./api";
 import type { ClubRecord, ClubMember } from "./api";
 
@@ -29,6 +29,8 @@ export default function ClubsModal({ open, onClose }: ClubsModalProps) {
   const [viewingClubId, setViewingClubId] = useState<number | null>(null);
   const [members, setMembers] = useState<ClubMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [confirmDeleteClubId, setConfirmDeleteClubId] = useState<number | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!auth) return;
@@ -85,6 +87,24 @@ export default function ClubsModal({ open, onClose }: ClubsModalProps) {
     } catch {
       // ignore
     }
+  };
+
+  const handleDelete = async (clubId: number) => {
+    if (!auth) return;
+    setDeleteBusy(true);
+    try {
+      const res = await deleteClub(auth, clubId);
+      if (res.message === "club deleted") {
+        setViewingClubId(null);
+        setConfirmDeleteClubId(null);
+        await refresh();
+      } else {
+        alert(res.message);
+      }
+    } catch {
+      // ignore
+    }
+    setDeleteBusy(false);
   };
 
   const viewMembers = async (clubId: number) => {
@@ -163,12 +183,41 @@ export default function ClubsModal({ open, onClose }: ClubsModalProps) {
                             <span className="club-member-role">{m.role}</span>
                           </div>
                         ))}
-                        <button
-                          className="btn-text-danger"
-                          onClick={() => handleLeave(club.id)}
-                        >
-                          Leave club
-                        </button>
+                        <div className="club-card-actions">
+                          <button
+                            className="btn-text-danger"
+                            onClick={() => handleLeave(club.id)}
+                          >
+                            Leave club
+                          </button>
+                          {club.member_role === "admin" && (
+                            confirmDeleteClubId === club.id ? (
+                              <>
+                                <span className="club-delete-confirm-text">Delete this club for everyone?</span>
+                                <button
+                                  className="btn-text-danger"
+                                  onClick={() => handleDelete(club.id)}
+                                  disabled={deleteBusy}
+                                >
+                                  {deleteBusy ? "..." : "Confirm delete"}
+                                </button>
+                                <button
+                                  className="btn-text-secondary"
+                                  onClick={() => setConfirmDeleteClubId(null)}
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                className="btn-text-danger"
+                                onClick={() => setConfirmDeleteClubId(club.id)}
+                              >
+                                Delete club
+                              </button>
+                            )
+                          )}
+                        </div>
                       </>
                     )}
                   </div>
