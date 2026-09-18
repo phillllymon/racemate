@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { ReactNode } from "react";
 import { useAuth } from "./AuthContext";
 import {
@@ -198,7 +198,18 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   // overwrite a good cache with blanks.
   const [hydrated, setHydrated] = useState(false);
 
-  const auth = user && token ? { userId: user.id, token } : null;
+  // Memoized so it's referentially stable across renders when the underlying
+  // user/token haven't actually changed — this object literal used to be rebuilt
+  // fresh on every render, which cascaded through every useCallback that depends
+  // on `auth` (ensureBoatsLoaded, fetchRaceBoatsInto, ...) and caused the
+  // race-selection effect to re-fire on nearly every render. Since that effect's
+  // own getRaceBoats response triggers a re-render, that became a self-sustaining
+  // loop firing getRaceBoats continuously instead of only when selectedRaceId
+  // actually changes.
+  const auth = useMemo(
+    () => (user && token ? { userId: user.id, token } : null),
+    [user?.id, token]
+  );
 
   // Check if a key has pending or in-flight writes
   const hasPendingWrite = useCallback((key: string) => {
@@ -252,17 +263,38 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   // still queued keeps its local value (so a background poll can't revert an edit
   // that just hasn't reached the server yet), and any local-only row not yet
   // confirmed server-side (still on a temp ID, or its add is still queued) survives.
+  //
+  // Two things have to be handled carefully here, both around deletes:
+  // 1. A boat can have a pending write (a delete, still in flight) but no local
+  //    copy at all — removeBoatFromRace removes it from local state immediately.
+  //    If we fell through to the fresh (pre-delete) copy in that case we'd
+  //    resurrect a boat that was just deleted, simply because the delete hadn't
+  //    reached the server yet.
+  // 2. Once that delete *does* flush, its pending-write entry is gone — so a
+  //    local-only entry surviving into `merged` with no pending write and no temp
+  //    ID isn't a legitimate not-yet-synced addition, it's a stale leftover (e.g.
+  //    from case 1 before this fix existed). Only entries actually explained by a
+  //    temp ID or an active pending write should survive; anything else defers to
+  //    the server's copy (or absence of one) as the source of truth.
   const mergeRaceBoats = useCallback((localBoats: RaceBoatEntry[], freshBoats: RaceBoatEntry[], raceId: number) => {
     const freshIds = new Set(freshBoats.map((b) => b.boatId));
-    const merged = freshBoats.map((fresh) => {
+    const merged: RaceBoatEntry[] = [];
+    freshBoats.forEach((fresh) => {
       if (hasPendingWrite(`race-boat-${raceId}-${fresh.boatId}`)) {
         const local = localBoats.find((b) => b.boatId === fresh.boatId);
-        if (local) return local;
+        if (local) merged.push(local);
+        // else: pending write with no local copy — a delete in flight. Drop the
+        // stale fresh copy instead of resurrecting it.
+      } else {
+        merged.push(fresh);
       }
-      return fresh;
     });
     localBoats.forEach((b) => {
-      if (!freshIds.has(b.boatId)) merged.push(b);
+      if (freshIds.has(b.boatId)) return; // already handled above
+      if (b.boatId < 0 || hasPendingWrite(`race-boat-${raceId}-${b.boatId}`)) {
+        merged.push(b); // genuinely not-yet-synced: temp ID, or its write is still queued
+      }
+      // else: absent from the server and nothing explains why — stale, drop it.
     });
     return merged;
   }, [hasPendingWrite]);

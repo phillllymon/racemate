@@ -1270,13 +1270,10 @@ function SeriesCard({ s, isExpanded, onToggle }: { s: Series; isExpanded: boolea
       assistants: seriesAssistants,
       assistantPermissions: seriesPermissions,
     });
-    // Also update any race that uses series-level settings
+    // Also update any race that uses series-level permissions
     seriesRaces.forEach((race) => {
-      const updates: Partial<RaceInfo> = {};
-      if (!race.info.customAssistants) updates.assistants = seriesAssistants;
-      if (!race.info.customPermissions) updates.assistantPermissions = seriesPermissions;
-      if (Object.keys(updates).length > 0) {
-        updateRaceData(race.id, race.name, { ...race.info, ...updates });
+      if (!race.info.customPermissions) {
+        updateRaceData(race.id, race.name, { ...race.info, assistantPermissions: seriesPermissions });
       }
     });
     setEditingSeries(false);
