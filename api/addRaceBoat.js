@@ -44,7 +44,8 @@ module.exports.default = async function handler(req, res) {
                     finish_time = EXCLUDED.finish_time,
                     laps_completed = EXCLUDED.laps_completed,
                     lap_times = EXCLUDED.lap_times,
-                    info = EXCLUDED.info
+                    info = EXCLUDED.info,
+                    version = race_boats.version + 1
                 RETURNING *
             `;
 

@@ -36,7 +36,7 @@ module.exports.default = async function handler(req, res) {
                                         const { boats: _boats, ...infoWithoutBoats } = raceInfo;
                                         sql`
                                             UPDATE races
-                                            SET info = ${JSON.stringify(infoWithoutBoats)}, name = ${raceName}
+                                            SET info = ${JSON.stringify(infoWithoutBoats)}, name = ${raceName}, version = version + 1
                                             WHERE id = ${raceId}
                                             RETURNING *
                                         `.then((updatedRaceInfo) => {

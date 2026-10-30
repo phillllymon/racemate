@@ -36,7 +36,7 @@ module.exports.default = async function handler(req, res) {
                 UPDATE race_boats
                 SET class = ${boatClass || ''}, status = ${status || 'registered'},
                     finish_time = ${finishTime ?? null}, laps_completed = ${lapsCompleted || 0},
-                    lap_times = ${lapTimesStr}, info = ${infoStr}
+                    lap_times = ${lapTimesStr}, info = ${infoStr}, version = version + 1
                 WHERE race_id = ${raceId} AND boat_id = ${boatId}
                 RETURNING *
             `;

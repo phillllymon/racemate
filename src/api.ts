@@ -1,4 +1,5 @@
 const BASE_URL = "https://racematevercel.vercel.app/api";
+const REQUEST_TIMEOUT_MS = 15000;
 
 // ---- Auth types ----
 
@@ -30,6 +31,7 @@ export interface BoatRecord {
   name: string;
   info: string;
   owner: string;
+  version?: number;
 }
 
 export interface RaceRecord {
@@ -37,6 +39,7 @@ export interface RaceRecord {
   name: string;
   info: string;
   owner: string;
+  version?: number;
 }
 
 export interface SeriesRecord {
@@ -44,6 +47,7 @@ export interface SeriesRecord {
   name: string;
   info: string;
   owner: string;
+  version?: number;
 }
 
 export interface RaceBoatRow {
@@ -57,6 +61,7 @@ export interface RaceBoatRow {
   lap_times: number[];
   info: Record<string, unknown>;
   created_at: string;
+  version?: number;
 }
 
 export function rowToEntry(row: RaceBoatRow): RaceBoatEntry {
@@ -176,19 +181,28 @@ interface AuthParams {
 }
 
 async function post<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${BASE_URL}/${endpoint}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(`API error ${res.status} on ${endpoint}`);
+  // Bound every request: the sync queue treats a key as "in flight" until its request
+  // settles, so a request that hangs with no error would otherwise block that key forever.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE_URL}/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`API error ${res.status} on ${endpoint}`);
+    }
+    const data = await res.json();
+    if (data.message === "token mismatch" || data.message === "user not found") {
+      window.dispatchEvent(new Event("racemate-auth-invalid"));
+    }
+    return data;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  const data = await res.json();
-  if (data.message === "token mismatch" || data.message === "user not found") {
-    window.dispatchEvent(new Event("racemate-auth-invalid"));
-  }
-  return data;
 }
 
 // ---- Auth ----

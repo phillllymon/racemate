@@ -78,6 +78,13 @@ async function executeWrite(auth: Auth, write: PendingWrite): Promise<unknown> {
   }
 }
 
+// The server bumps a row's `version` on every write and returns it with the row. Each
+// write endpoint wraps the row differently (race/series/boat arrays, or a single row).
+function writtenVersion(res: unknown): number | undefined {
+  const r = res as { race?: { version?: number }[]; series?: { version?: number }[]; boat?: { version?: number }[]; row?: { version?: number } | null } | null;
+  return (r?.race?.[0] ?? r?.series?.[0] ?? r?.boat?.[0] ?? r?.row)?.version;
+}
+
 // A create that hasn't been confirmed by the server yet, tracked under its
 // temporary (large negative) local ID until it resolves to a real one.
 type PendingCreate =
@@ -86,6 +93,9 @@ type PendingCreate =
   | { kind: "series"; name: string; info: SeriesInfo };
 
 // ---- Local cache (per-user, survives reload/logout-login on this device) ----
+
+const FLUSH_DEBOUNCE_MS = 5000;
+const FLUSH_MAX_WAIT_MS = 15000;
 
 const CACHE_VERSION = 1;
 const cacheKey = (userId: string) => `racemate-cache-v${CACHE_VERSION}-${userId}`;
@@ -170,6 +180,10 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   const pendingUpdates = useRef<Map<string, PendingWrite>>(new Map());
   const inFlightKeys = useRef<Set<string>>(new Set());
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // When the oldest not-yet-flushed edit was queued. The flush is a debounce (each new
+  // edit pushes it back FLUSH_DEBOUNCE_MS), so without this a steady stream of edits
+  // would keep postponing it indefinitely; this caps the total wait at FLUSH_MAX_WAIT_MS.
+  const oldestQueuedAt = useRef<number | null>(null);
 
   // Pending creates — races/series/boats waiting on their real ID.
   const pendingCreatesRef = useRef<Map<number, PendingCreate>>(new Map());
@@ -216,19 +230,51 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     return pendingUpdates.current.has(key) || inFlightKeys.current.has(key);
   }, []);
 
+  // Highest server version seen per sync-queue key (from write responses and from reads).
+  // A fetch that was already stale when it arrived — e.g. a poll issued before a write
+  // that has since completed — carries a lower version than we've seen, and must not
+  // overwrite the newer local copy. Kept in memory only: it guards requests that are in
+  // flight right now, and a reload cancels those.
+  const seenVersions = useRef<Map<string, number>>(new Map());
+  const noteVersion = useCallback((key: string, version: number | undefined) => {
+    if (version == null) return;
+    seenVersions.current.set(key, Math.max(version, seenVersions.current.get(key) ?? 0));
+  }, []);
+  const isStale = useCallback((key: string, version: number | undefined) => {
+    return (version ?? 0) < (seenVersions.current.get(key) ?? 0);
+  }, []);
+  // Record the versions in a fetched batch; returns them by id so the merge can check each row.
+  const trackVersions = useCallback((items: { id: number; version?: number }[], keyOf: (id: number) => string) => {
+    const byId = new Map<number, number>();
+    items.forEach(({ id, version }) => {
+      byId.set(id, version ?? 0);
+      noteVersion(keyOf(id), version);
+    });
+    return byId;
+  }, [noteVersion]);
+
   // Flush pending updates to backend
   const flush = useCallback(async () => {
     if (!auth || pendingUpdates.current.size === 0) {
-      if (pendingCreatesRef.current.size === 0) setSynced(true);
+      oldestQueuedAt.current = null;
+      if (pendingCreatesRef.current.size === 0 && inFlightKeys.current.size === 0) setSynced(true);
       return;
     }
-    const batch = Array.from(pendingUpdates.current.entries());
-    pendingUpdates.current.clear();
+    // A key whose previous write is still awaiting a response stays queued: sending a
+    // second request for it could reach the server out of order and leave it holding
+    // the older state. Writes are full-state, so whatever is queued under the key keeps
+    // being overwritten by newer edits (the "merge"), and goes out once the in-flight
+    // request settles — that completion reschedules a flush below.
+    const batch = Array.from(pendingUpdates.current.entries())
+      .filter(([key]) => !inFlightKeys.current.has(key));
+    if (batch.length === 0) return;
+    oldestQueuedAt.current = null;
+    batch.forEach(([key]) => pendingUpdates.current.delete(key));
     batch.forEach(([key]) => inFlightKeys.current.add(key));
 
     await Promise.allSettled(
       batch.map(([key, write]) =>
-        executeWrite(auth, write).catch((e) => {
+        executeWrite(auth, write).then((res) => noteVersion(key, writtenVersion(res))).catch((e) => {
           // Re-queue only this specific failed write, not the whole batch
           if (!pendingUpdates.current.has(key)) pendingUpdates.current.set(key, write);
           throw e;
@@ -239,17 +285,20 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     batch.forEach(([key]) => inFlightKeys.current.delete(key));
     touchQueue();
 
-    if (pendingUpdates.current.size === 0 && pendingCreatesRef.current.size === 0) {
+    if (pendingUpdates.current.size === 0 && pendingCreatesRef.current.size === 0 && inFlightKeys.current.size === 0) {
       setSynced(true);
-    } else {
+    } else if (pendingUpdates.current.size > 0) {
       scheduleFlush();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth]);
+  }, [auth, noteVersion]);
 
   const scheduleFlush = useCallback(() => {
     if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(flush, 5000);
+    const now = Date.now();
+    if (oldestQueuedAt.current == null) oldestQueuedAt.current = now;
+    const untilMaxWait = oldestQueuedAt.current + FLUSH_MAX_WAIT_MS - now;
+    syncTimer.current = setTimeout(flush, Math.max(0, Math.min(FLUSH_DEBOUNCE_MS, untilMaxWait)));
   }, [flush]);
 
   const queueUpdate = useCallback((key: string, write: PendingWrite) => {
@@ -276,14 +325,19 @@ export function RaceProvider({ children }: { children: ReactNode }) {
   //    from case 1 before this fix existed). Only entries actually explained by a
   //    temp ID or an active pending write should survive; anything else defers to
   //    the server's copy (or absence of one) as the source of truth.
-  const mergeRaceBoats = useCallback((localBoats: RaceBoatEntry[], freshBoats: RaceBoatEntry[], raceId: number) => {
+  //
+  // `freshVersions` (boatId -> server version) lets the merge also reject a fetched row
+  // that is older than a version we've already seen for it (see seenVersions): that
+  // fetch was in flight while a write completed, so the local copy is the newer one.
+  const mergeRaceBoats = useCallback((localBoats: RaceBoatEntry[], freshBoats: RaceBoatEntry[], raceId: number, freshVersions?: Map<number, number>) => {
     const freshIds = new Set(freshBoats.map((b) => b.boatId));
     const merged: RaceBoatEntry[] = [];
     freshBoats.forEach((fresh) => {
-      if (hasPendingWrite(`race-boat-${raceId}-${fresh.boatId}`)) {
+      const key = `race-boat-${raceId}-${fresh.boatId}`;
+      if (hasPendingWrite(key) || isStale(key, freshVersions?.get(fresh.boatId))) {
         const local = localBoats.find((b) => b.boatId === fresh.boatId);
         if (local) merged.push(local);
-        // else: pending write with no local copy — a delete in flight. Drop the
+        // else: no local copy — a delete in flight (or already done). Drop the
         // stale fresh copy instead of resurrecting it.
       } else {
         merged.push(fresh);
@@ -297,7 +351,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       // else: absent from the server and nothing explains why — stale, drop it.
     });
     return merged;
-  }, [hasPendingWrite]);
+  }, [hasPendingWrite, isStale]);
 
   // Backfill the boat directory (names, sail numbers, etc.) for any boat ID we've
   // just learned about via race_boats but don't have a record for locally — e.g.
@@ -350,6 +404,13 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       const ownedSeries = seriesRes.results.map((r: SeriesRecord) => parseRecord<SeriesInfo>(r));
       const assistSeries = (assistantRes.series || []).map((r: SeriesRecord) => parseRecord<SeriesInfo>(r));
 
+      // Note every fetched row's version up front, so the merges below can tell a row
+      // that was already stale on arrival (older than a write we've since seen) apart
+      // from a genuinely newer server copy.
+      const raceVersions = trackVersions([...racesRes.results, ...(assistantRes.races || [])], (id) => `race-${id}`);
+      const seriesVersions = trackVersions([...seriesRes.results, ...(assistantRes.series || [])], (id) => `series-${id}`);
+      const boatVersions = trackVersions(boatsRes.results, (id) => `boat-${id}`);
+
       const raceMap = new Map<number, Race>();
       ownedRaces.forEach((r) => raceMap.set(r.id, r));
       assistRaces.forEach((r) => { if (!raceMap.has(r.id)) raceMap.set(r.id, r); });
@@ -393,7 +454,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       setRaces((prev) => {
         const merged = Array.from(raceMap.values()).map((fresh) => {
           const existing = prev.find((r) => r.id === fresh.id);
-          if (existing && hasPendingWrite(`race-${fresh.id}`)) return existing;
+          if (existing && (hasPendingWrite(`race-${fresh.id}`) || isStale(`race-${fresh.id}`, raceVersions.get(fresh.id)))) return existing;
           // race_boats isn't part of this row server-side — keep whatever's loaded locally.
           return { ...fresh, info: { ...fresh.info, boats: existing?.info.boats || [] } };
         });
@@ -404,7 +465,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
       setSeries((prev) => {
         const merged = Array.from(seriesMap.values()).map((fresh) => {
           const existing = prev.find((s) => s.id === fresh.id);
-          if (existing && hasPendingWrite(`series-${fresh.id}`)) return existing;
+          if (existing && (hasPendingWrite(`series-${fresh.id}`) || isStale(`series-${fresh.id}`, seriesVersions.get(fresh.id)))) return existing;
           return fresh;
         });
         prev.forEach((s) => { if (!seriesMap.has(s.id)) merged.push(s); });
@@ -415,7 +476,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
         const freshIds = new Set(freshBoats.map((b) => b.id));
         const merged = freshBoats.map((fresh) => {
           const existing = prev.find((b) => b.id === fresh.id);
-          if (existing && hasPendingWrite(`boat-${fresh.id}`)) return existing;
+          if (existing && (hasPendingWrite(`boat-${fresh.id}`) || isStale(`boat-${fresh.id}`, boatVersions.get(fresh.id)))) return existing;
           return fresh;
         });
         prev.forEach((b) => { if (!freshIds.has(b.id)) merged.push(b); });
@@ -424,13 +485,14 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     } catch (_e) {
       // Offline or request failed — local state (from cache or this session) stands.
     }
-  }, [auth?.userId, auth?.token, hasPendingWrite]);
+  }, [auth?.userId, auth?.token, hasPendingWrite, isStale, trackVersions]);
 
   // On login: hydrate from this device's cache first (instant, works offline), then
   // reconcile with the server in the background. Only block on the network fetch
   // if there's no cache at all yet (first time this user's data has loaded here).
   useEffect(() => {
     setHydrated(false);
+    seenVersions.current = new Map();
     if (!user?.id) { setLoading(false); setHydrated(true); return; }
     const cached = loadCache(user.id);
     if (cached) {
@@ -472,14 +534,15 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     if (!auth) return Promise.resolve();
     return getRaceBoats(auth, raceId).then((res) => {
       const freshBoats = res.rows.map(rowToEntry);
+      const freshVersions = trackVersions(res.rows.map((r) => ({ id: r.boat_id, version: r.version })), (id) => `race-boat-${raceId}-${id}`);
       ensureBoatsLoaded(freshBoats.map((b) => b.boatId));
       setRaces((prev) => prev.map((r) => {
         if (r.id !== raceId) return r;
         const localBoats = (r.info.boats || []) as RaceBoatEntry[];
-        return { ...r, info: { ...r.info, boats: mergeRaceBoats(localBoats, freshBoats, raceId) } };
+        return { ...r, info: { ...r.info, boats: mergeRaceBoats(localBoats, freshBoats, raceId, freshVersions) } };
       }));
     }).catch(() => {});
-  }, [auth, mergeRaceBoats, ensureBoatsLoaded]);
+  }, [auth, mergeRaceBoats, ensureBoatsLoaded, trackVersions]);
 
   // Fetch every race in a series, not just the one currently selected — otherwise
   // series-wide results only ever reflect whichever single race you last had open.
@@ -527,12 +590,15 @@ export function RaceProvider({ children }: { children: ReactNode }) {
           getRaceBoats(auth, selectedRaceId),
         ]);
         const freshBoats = boatsRes.rows.map(rowToEntry);
+        const freshVersions = trackVersions(boatsRes.rows.map((r) => ({ id: r.boat_id, version: r.version })), (id) => `race-boat-${selectedRaceId}-${id}`);
+        const raceKey = `race-${selectedRaceId}`;
+        if (raceRes && raceRes.results.length === 1) noteVersion(raceKey, raceRes.results[0].version);
         ensureBoatsLoaded(freshBoats.map((b) => b.boatId));
         setRaces((prev) => prev.map((r) => {
           if (r.id !== selectedRaceId) return r;
           const localBoats = (r.info.boats || []) as RaceBoatEntry[];
-          const mergedBoats = mergeRaceBoats(localBoats, freshBoats, selectedRaceId);
-          if (raceRes && raceRes.results.length === 1 && !hasPendingWrite(`race-${selectedRaceId}`)) {
+          const mergedBoats = mergeRaceBoats(localBoats, freshBoats, selectedRaceId, freshVersions);
+          if (raceRes && raceRes.results.length === 1 && !hasPendingWrite(raceKey) && !isStale(raceKey, raceRes.results[0].version)) {
             const freshRace = parseRecord<RaceInfo>(raceRes.results[0]);
             // Preserve locally-added empty classes that haven't been synced yet
             const localEmptyClasses = (r.info.emptyClasses as string[] | undefined) || [];
@@ -548,7 +614,7 @@ export function RaceProvider({ children }: { children: ReactNode }) {
     }, interval);
 
     return () => clearInterval(timer);
-  }, [selectedRaceId, auth?.userId, auth?.token, hasPendingWrite, mergeRaceBoats, ensureBoatsLoaded]);
+  }, [selectedRaceId, auth?.userId, auth?.token, hasPendingWrite, mergeRaceBoats, ensureBoatsLoaded, trackVersions, noteVersion, isStale]);
 
   // Cleanup timers on unmount
   useEffect(() => {

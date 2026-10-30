@@ -35,7 +35,7 @@ module.exports.default = async function handler(req, res) {
                                     if (boats[0]["owner"] === userId) {
                                         sql`
                                             UPDATE boats
-                                            SET info = ${JSON.stringify(boatInfo)}, name = ${boatName}
+                                            SET info = ${JSON.stringify(boatInfo)}, name = ${boatName}, version = version + 1
                                             WHERE id = ${boatId}
                                             RETURNING *
                                         `.then((updatedBoatInfo) => {
